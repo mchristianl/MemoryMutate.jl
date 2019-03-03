@@ -3,7 +3,7 @@
 
 WARNING: This is a proof of conept and it's underlying assumptions need additional validation.
 
-A macro `@mutate` is provided for multi-_level_ assignments `a.b.c.d.e = v` that uses `fieldoffset` to calculate the memory offset of the to-be-assigned field relative to the rightmost mutable _level_ and uses `pointer_from_objref` on that rightmost mutable _level_, adds this offset to the obtained pointer and uses `unsafe_store!` to write the value to that memory location. It compiles down to a few `mov` assembly instructions, if the types and symbols are statically determinable.
+A macro `@mem` is provided for multi-_level_ assignments `a.b.c.d.e = v` that uses `fieldoffset` to calculate the memory offset of the to-be-assigned field relative to the rightmost mutable _level_ and uses `pointer_from_objref` on that rightmost mutable _level_, adds this offset to the obtained pointer and uses `unsafe_store!` to write the value to that memory location. It compiles down to a few `mov` assembly instructions, if the types and symbols are statically determinable.
 
 This is a **different** approach then replacing the whole immutable of the right-most mutable with a new, modified one, as in
 
@@ -166,7 +166,7 @@ v.p.x = 5f0
 since we assume that these immutables do not need to stay _constant_, we can replace them at their memory location
 
 ```julia
-@mutate v.p.x = 5f0
+@mem v.p.x = 5f0
 v # Vmutbl(Pconst(5.0f0, 3.0f0), Cconst(0.0f0, 1.0f0, 0.0f0))
 ```
 
@@ -182,3 +182,7 @@ To be done:
 - currently we use `getfield` for `.` instead of `getproperty` (`getproperty` is what is called by `.`)
 - `+=` operations and similiar
 - continuous array indexing `a[10] = v`, e.g. for static arrays
+
+### Credits
+
+… go to [andreasnoack](https://github.com/andreasnoack) for the instant advice, saving me a lot of time, [pfitzseb](https://github.com/pfitzseb) for the elaborate discussion and the #internals slack channel for their approval.

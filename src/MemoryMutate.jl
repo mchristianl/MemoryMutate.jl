@@ -1,5 +1,5 @@
 module MemoryMutate
-  export @mutate
+  export @mem
 
   # TODO: may fuse fieldindex_generated, fieldisbitstype_generated and fieldisimmutable_generated into a single function
   # TODO: spread a few assertions with descriptive error messages
@@ -72,7 +72,7 @@ module MemoryMutate
   fieldtype_static(::T, f::Symbol) where T = fieldtype(T,f)
 
   # structinfo(T) = [(fieldoffset(T,i), fieldname(T,i), fieldtype(T,i)) for i = 1:fieldcount(T)];
-  macro mutate(expr)
+  macro mem(expr)
     @assert expr.head == :(=) "Expression for mutating must be an assignment (=)."
     RHS = expr.args[2]
 

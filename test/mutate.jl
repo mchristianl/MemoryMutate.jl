@@ -51,20 +51,20 @@ c1 = C1(0.0f0,d1)
 b1 = B1(0.0f0,c1)
 a1 = A1(0.0f0,b1)
 
-test101(a::A1,v::Float32) = @mutate a.b.c.d.e.f.g.x = v
-test102(a::A1,v::G1)      = @mutate a.b.c.d.e.f.g = v
-test103(a::A1,v::Float32) = @mutate a.b.c.d.e.f.x = v
-test104(a::A1,v::F1)      = @mutate a.b.c.d.e.f = v
-test105(a::A1,v::Float32) = @mutate a.b.c.d.e.x = v
-test106(a::A1,v::E1)      = @mutate a.b.c.d.e = v
-test107(a::A1,v::Float32) = @mutate a.b.c.d.x = v
-test108(a::A1,v::D1)      = @mutate a.b.c.d = v
-test109(a::A1,v::Float32) = @mutate a.b.c.x = v
-test110(a::A1,v::C1)      = @mutate a.b.c = v
-test111(a::A1,v::Float32) = @mutate a.b.x = v
-test112(a::A1,v::B1)      = @mutate a.b = v
-test113(a::A1,v::Float32) = @mutate a.x = v
-test114(a::A1,v::A1)      = @mutate a = v
+test101(a::A1,v::Float32) = @mem a.b.c.d.e.f.g.x = v
+test102(a::A1,v::G1)      = @mem a.b.c.d.e.f.g = v
+test103(a::A1,v::Float32) = @mem a.b.c.d.e.f.x = v
+test104(a::A1,v::F1)      = @mem a.b.c.d.e.f = v
+test105(a::A1,v::Float32) = @mem a.b.c.d.e.x = v
+test106(a::A1,v::E1)      = @mem a.b.c.d.e = v
+test107(a::A1,v::Float32) = @mem a.b.c.d.x = v
+test108(a::A1,v::D1)      = @mem a.b.c.d = v
+test109(a::A1,v::Float32) = @mem a.b.c.x = v
+test110(a::A1,v::C1)      = @mem a.b.c = v
+test111(a::A1,v::Float32) = @mem a.b.x = v
+test112(a::A1,v::B1)      = @mem a.b = v
+test113(a::A1,v::Float32) = @mem a.x = v
+test114(a::A1,v::A1)      = @mem a = v
 
 v  = 0f0
 v += 1f0; @assert a1.b.c.d.e.f.g.x != v;        test101(a1,v);        @assert a1.b.c.d.e.f.g.x == v
@@ -101,20 +101,20 @@ code_native(io,test114,(A1,A1))     ; display_asm_stat_io(io) # (total = 3, movs
 
 a1 = A1(0.0f0,b1)
 
-test101b(a::A1,v::Float32) = @mutate getfield(a.b.c,:d).e.f.g.x = v
-test102b(a::A1,v::G1)      = @mutate getfield(a.b.c,:d).e.f.g = v
-test103b(a::A1,v::Float32) = @mutate getfield(a.b.c,:d).e.f.x = v
-test104b(a::A1,v::F1)      = @mutate getfield(a.b.c,:d).e.f = v
-test105b(a::A1,v::Float32) = @mutate getfield(a.b.c,:d).e.x = v
-test106b(a::A1,v::E1)      = @mutate getfield(a.b.c,:d).e = v
-test107b(a::A1,v::Float32) = @mutate getfield(a.b.c,:d).x = v
-test108b(a::A1,v::D1)      = @mutate getfield(a.b.c,:d) = v
-test109b(a::A1,v::Float32) = @mutate a.b.c.x = v
-test110b(a::A1,v::C1)      = @mutate a.b.c = v
-test111b(a::A1,v::Float32) = @mutate a.b.x = v
-test112b(a::A1,v::B1)      = @mutate a.b = v
-test113b(a::A1,v::Float32) = @mutate a.x = v
-test114b(a::A1,v::A1)      = @mutate a = v
+test101b(a::A1,v::Float32) = @mem getfield(a.b.c,:d).e.f.g.x = v
+test102b(a::A1,v::G1)      = @mem getfield(a.b.c,:d).e.f.g = v
+test103b(a::A1,v::Float32) = @mem getfield(a.b.c,:d).e.f.x = v
+test104b(a::A1,v::F1)      = @mem getfield(a.b.c,:d).e.f = v
+test105b(a::A1,v::Float32) = @mem getfield(a.b.c,:d).e.x = v
+test106b(a::A1,v::E1)      = @mem getfield(a.b.c,:d).e = v
+test107b(a::A1,v::Float32) = @mem getfield(a.b.c,:d).x = v
+test108b(a::A1,v::D1)      = @mem getfield(a.b.c,:d) = v
+test109b(a::A1,v::Float32) = @mem a.b.c.x = v
+test110b(a::A1,v::C1)      = @mem a.b.c = v
+test111b(a::A1,v::Float32) = @mem a.b.x = v
+test112b(a::A1,v::B1)      = @mem a.b = v
+test113b(a::A1,v::Float32) = @mem a.x = v
+test114b(a::A1,v::A1)      = @mem a = v
 
 v  = 0f0
 v += 1f0; @assert a1.b.c.d.e.f.g.x != v;        test101b(a1,v);        @assert a1.b.c.d.e.f.g.x == v
@@ -165,20 +165,20 @@ c2 = C2(2.0f0,d2)
 b2 = B2(1.0f0,c2)
 a2 = A2(0.0f0,b2)
 
-test201(a::A2,v::Float32) = @mutate a.b.c.d.e.f.g.x = v
-test202(a::A2,v::G2)      = @mutate a.b.c.d.e.f.g = v
-test203(a::A2,v::Float32) = @mutate a.b.c.d.e.f.x = v
-test204(a::A2,v::F2)      = @mutate a.b.c.d.e.f = v
-test205(a::A2,v::Float32) = @mutate a.b.c.d.e.x = v
-test206(a::A2,v::E2)      = @mutate a.b.c.d.e = v
-test207(a::A2,v::Float32) = @mutate a.b.c.d.x = v
-test208(a::A2,v::D2)      = @mutate a.b.c.d = v
-test209(a::A2,v::Float32) = @mutate a.b.c.x = v
-test210(a::A2,v::C2)      = @mutate a.b.c = v
-test211(a::A2,v::Float32) = @mutate a.b.x = v
-test212(a::A2,v::B2)      = @mutate a.b = v
-test213(a::A2,v::Float32) = @mutate a.x = v
-test214(a::A2,v::A2)      = @mutate a = v
+test201(a::A2,v::Float32) = @mem a.b.c.d.e.f.g.x = v
+test202(a::A2,v::G2)      = @mem a.b.c.d.e.f.g = v
+test203(a::A2,v::Float32) = @mem a.b.c.d.e.f.x = v
+test204(a::A2,v::F2)      = @mem a.b.c.d.e.f = v
+test205(a::A2,v::Float32) = @mem a.b.c.d.e.x = v
+test206(a::A2,v::E2)      = @mem a.b.c.d.e = v
+test207(a::A2,v::Float32) = @mem a.b.c.d.x = v
+test208(a::A2,v::D2)      = @mem a.b.c.d = v
+test209(a::A2,v::Float32) = @mem a.b.c.x = v
+test210(a::A2,v::C2)      = @mem a.b.c = v
+test211(a::A2,v::Float32) = @mem a.b.x = v
+test212(a::A2,v::B2)      = @mem a.b = v
+test213(a::A2,v::Float32) = @mem a.x = v
+test214(a::A2,v::A2)      = @mem a = v
 
             v  = 0f0
             v += 1f0; @assert a2.b.c.d.e.f.g.x != v;        test201(a2,v);        @assert a2.b.c.d.e.f.g.x == v
@@ -229,20 +229,20 @@ c3 = C3(2.0f0,d3)
 b3 = B3(1.0f0,c3)
 a3 = A3(0.0f0,b3)
 
-test301(a::Base.RefValue{A3},v::Float32) = @mutate a[].b.c.d.e.f.g.x = v
-test302(a::Base.RefValue{A3},v::G3)      = @mutate a[].b.c.d.e.f.g = v
-test303(a::Base.RefValue{A3},v::Float32) = @mutate a[].b.c.d.e.f.x = v
-test304(a::Base.RefValue{A3},v::F3)      = @mutate a[].b.c.d.e.f = v
-test305(a::Base.RefValue{A3},v::Float32) = @mutate a[].b.c.d.e.x = v
-test306(a::Base.RefValue{A3},v::E3)      = @mutate a[].b.c.d.e = v
-test307(a::Base.RefValue{A3},v::Float32) = @mutate a[].b.c.d.x = v
-test308(a::Base.RefValue{A3},v::D3)      = @mutate a[].b.c.d = v
-test309(a::Base.RefValue{A3},v::Float32) = @mutate a[].b.c.x = v
-test310(a::Base.RefValue{A3},v::C3)      = @mutate a[].b.c = v
-test311(a::Base.RefValue{A3},v::Float32) = @mutate a[].b.x = v
-test312(a::Base.RefValue{A3},v::B3)      = @mutate a[].b = v
-test313(a::Base.RefValue{A3},v::Float32) = @mutate a[].x = v
-test314(a::Base.RefValue{A3},v::A3)      = @mutate a[] = v
+test301(a::Base.RefValue{A3},v::Float32) = @mem a[].b.c.d.e.f.g.x = v
+test302(a::Base.RefValue{A3},v::G3)      = @mem a[].b.c.d.e.f.g = v
+test303(a::Base.RefValue{A3},v::Float32) = @mem a[].b.c.d.e.f.x = v
+test304(a::Base.RefValue{A3},v::F3)      = @mem a[].b.c.d.e.f = v
+test305(a::Base.RefValue{A3},v::Float32) = @mem a[].b.c.d.e.x = v
+test306(a::Base.RefValue{A3},v::E3)      = @mem a[].b.c.d.e = v
+test307(a::Base.RefValue{A3},v::Float32) = @mem a[].b.c.d.x = v
+test308(a::Base.RefValue{A3},v::D3)      = @mem a[].b.c.d = v
+test309(a::Base.RefValue{A3},v::Float32) = @mem a[].b.c.x = v
+test310(a::Base.RefValue{A3},v::C3)      = @mem a[].b.c = v
+test311(a::Base.RefValue{A3},v::Float32) = @mem a[].b.x = v
+test312(a::Base.RefValue{A3},v::B3)      = @mem a[].b = v
+test313(a::Base.RefValue{A3},v::Float32) = @mem a[].x = v
+test314(a::Base.RefValue{A3},v::A3)      = @mem a[] = v
 
 a3r = Ref(a3)
 
@@ -279,20 +279,20 @@ code_native(io,test314,(Base.RefValue{A3},A3))     ; display_asm_stat_io(io) # (
 
 ################################################################################
 
-test301b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::Float32) = @mutate a[][][].b.c.d.e.f.g.x = v
-test302b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::G3)      = @mutate a[][][].b.c.d.e.f.g = v
-test303b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::Float32) = @mutate a[][][].b.c.d.e.f.x = v
-test304b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::F3)      = @mutate a[][][].b.c.d.e.f = v
-test305b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::Float32) = @mutate a[][][].b.c.d.e.x = v
-test306b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::E3)      = @mutate a[][][].b.c.d.e = v
-test307b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::Float32) = @mutate a[][][].b.c.d.x = v
-test308b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::D3)      = @mutate a[][][].b.c.d = v
-test309b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::Float32) = @mutate a[][][].b.c.x = v
-test310b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::C3)      = @mutate a[][][].b.c = v
-test311b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::Float32) = @mutate a[][][].b.x = v
-test312b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::B3)      = @mutate a[][][].b = v
-test313b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::Float32) = @mutate a[][][].x = v
-test314b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::A3)      = @mutate a[][][] = v
+test301b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::Float32) = @mem a[][][].b.c.d.e.f.g.x = v
+test302b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::G3)      = @mem a[][][].b.c.d.e.f.g = v
+test303b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::Float32) = @mem a[][][].b.c.d.e.f.x = v
+test304b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::F3)      = @mem a[][][].b.c.d.e.f = v
+test305b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::Float32) = @mem a[][][].b.c.d.e.x = v
+test306b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::E3)      = @mem a[][][].b.c.d.e = v
+test307b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::Float32) = @mem a[][][].b.c.d.x = v
+test308b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::D3)      = @mem a[][][].b.c.d = v
+test309b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::Float32) = @mem a[][][].b.c.x = v
+test310b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::C3)      = @mem a[][][].b.c = v
+test311b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::Float32) = @mem a[][][].b.x = v
+test312b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::B3)      = @mem a[][][].b = v
+test313b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::Float32) = @mem a[][][].x = v
+test314b(a::Base.RefValue{Base.RefValue{Base.RefValue{A3}}},v::A3)      = @mem a[][][] = v
 
 a3rrr = Ref(Ref(Ref(a3)))
 
@@ -347,20 +347,20 @@ c4 = C4(0.0f0,d4)
 b4 = B4(0.0f0,c4)
 a4 = A4(0.0f0,b4)
 
-test401(a::A4,v::Float32) = @mutate a.b.c.d.e[].f.g.x = v
-test402(a::A4,v::G4)      = @mutate a.b.c.d.e[].f.g = v
-test403(a::A4,v::Float32) = @mutate a.b.c.d.e[].f.x = v
-test404(a::A4,v::F4)      = @mutate a.b.c.d.e[].f = v
-test405(a::A4,v::Float32) = @mutate a.b.c.d.e[].x = v
-test406(a::A4,v::E4)      = @mutate a.b.c.d.e[] = v
-test407(a::A4,v::Float32) = @mutate a.b.c.d.x = v
-test408(a::A4,v::D4)      = @mutate a.b.c.d = v
-test409(a::A4,v::Float32) = @mutate a.b.c.x = v
-test410(a::A4,v::C4)      = @mutate a.b.c = v
-test411(a::A4,v::Float32) = @mutate a.b.x = v
-test412(a::A4,v::B4)      = @mutate a.b = v
-test413(a::A4,v::Float32) = @mutate a.x = v
-test414(a::A4,v::A4)      = @mutate a = v
+test401(a::A4,v::Float32) = @mem a.b.c.d.e[].f.g.x = v
+test402(a::A4,v::G4)      = @mem a.b.c.d.e[].f.g = v
+test403(a::A4,v::Float32) = @mem a.b.c.d.e[].f.x = v
+test404(a::A4,v::F4)      = @mem a.b.c.d.e[].f = v
+test405(a::A4,v::Float32) = @mem a.b.c.d.e[].x = v
+test406(a::A4,v::E4)      = @mem a.b.c.d.e[] = v
+test407(a::A4,v::Float32) = @mem a.b.c.d.x = v
+test408(a::A4,v::D4)      = @mem a.b.c.d = v
+test409(a::A4,v::Float32) = @mem a.b.c.x = v
+test410(a::A4,v::C4)      = @mem a.b.c = v
+test411(a::A4,v::Float32) = @mem a.b.x = v
+test412(a::A4,v::B4)      = @mem a.b = v
+test413(a::A4,v::Float32) = @mem a.x = v
+test414(a::A4,v::A4)      = @mem a = v
 
             v  = 0f0
             v += 1f0; @assert a4.b.c.d.e[].f.g.x != v;             test401(a4,v);             @assert a4.b.c.d.e[].f.g.x == v
@@ -403,20 +403,20 @@ c4 = C4(0.0f0,d4)
 b4 = B4(0.0f0,c4)
 a4 = A4(0.0f0,b4)
 
-test401b(a::A4,v::Float32) = @mutate a.b.c.d.e.x.f.g.x = v
-test402b(a::A4,v::G4)      = @mutate a.b.c.d.e.x.f.g = v
-test403b(a::A4,v::Float32) = @mutate a.b.c.d.e.x.f.x = v
-test404b(a::A4,v::F4)      = @mutate a.b.c.d.e.x.f = v
-test405b(a::A4,v::Float32) = @mutate a.b.c.d.e.x.x = v
-test406b(a::A4,v::E4)      = @mutate a.b.c.d.e.x = v
-test407b(a::A4,v::Float32) = @mutate a.b.c.d.x = v
-test408b(a::A4,v::D4)      = @mutate a.b.c.d = v
-test409b(a::A4,v::Float32) = @mutate a.b.c.x = v
-test410b(a::A4,v::C4)      = @mutate a.b.c = v
-test411b(a::A4,v::Float32) = @mutate a.b.x = v
-test412b(a::A4,v::B4)      = @mutate a.b = v
-test413b(a::A4,v::Float32) = @mutate a.x = v
-test414b(a::A4,v::A4)      = @mutate a = v
+test401b(a::A4,v::Float32) = @mem a.b.c.d.e.x.f.g.x = v
+test402b(a::A4,v::G4)      = @mem a.b.c.d.e.x.f.g = v
+test403b(a::A4,v::Float32) = @mem a.b.c.d.e.x.f.x = v
+test404b(a::A4,v::F4)      = @mem a.b.c.d.e.x.f = v
+test405b(a::A4,v::Float32) = @mem a.b.c.d.e.x.x = v
+test406b(a::A4,v::E4)      = @mem a.b.c.d.e.x = v
+test407b(a::A4,v::Float32) = @mem a.b.c.d.x = v
+test408b(a::A4,v::D4)      = @mem a.b.c.d = v
+test409b(a::A4,v::Float32) = @mem a.b.c.x = v
+test410b(a::A4,v::C4)      = @mem a.b.c = v
+test411b(a::A4,v::Float32) = @mem a.b.x = v
+test412b(a::A4,v::B4)      = @mem a.b = v
+test413b(a::A4,v::Float32) = @mem a.x = v
+test414b(a::A4,v::A4)      = @mem a = v
 
             v  = 0f0
             v += 1f0; @assert a4.b.c.d.e.x.f.g.x != v;             test401b(a4,v);             @assert a4.b.c.d.e.x.f.g.x == v
@@ -469,20 +469,20 @@ code_native(io,test414b,(A4,A4))     ; display_asm_stat_io(io) # (total = 3, mov
 # b5 = B5(0.0f0,c5)
 # a5 = A5(0.0f0,b5)
 #
-# test501(a::A5,v::Float32) = @mutate a.b.c.d.e[].f.g.x = v
-# test502(a::A5,v::G5)      = @mutate a.b.c.d.e[].f.g = v
-# test503(a::A5,v::Float32) = @mutate a.b.c.d.e[].f.x = v
-# test504(a::A5,v::F5)      = @mutate a.b.c.d.e[].f = v
-# test505(a::A5,v::Float32) = @mutate a.b.c.d.e[].x = v
-# test506(a::A5,v::E5)      = @mutate a.b.c.d.e[] = v
-# test507(a::A5,v::Float32) = @mutate a.b.c.d.x = v
-# test508(a::A5,v::D5)      = @mutate a.b.c.d = v
-# test509(a::A5,v::Float32) = @mutate a.b.c.x = v
-# test510(a::A5,v::C5)      = @mutate a.b.c = v
-# test511(a::A5,v::Float32) = @mutate a.b.x = v
-# test512(a::A5,v::B5)      = @mutate a.b = v
-# test513(a::A5,v::Float32) = @mutate a.x = v
-# test514(a::A5,v::A5)      = @mutate a = v
+# test501(a::A5,v::Float32) = @mem a.b.c.d.e[].f.g.x = v
+# test502(a::A5,v::G5)      = @mem a.b.c.d.e[].f.g = v
+# test503(a::A5,v::Float32) = @mem a.b.c.d.e[].f.x = v
+# test504(a::A5,v::F5)      = @mem a.b.c.d.e[].f = v
+# test505(a::A5,v::Float32) = @mem a.b.c.d.e[].x = v
+# test506(a::A5,v::E5)      = @mem a.b.c.d.e[] = v
+# test507(a::A5,v::Float32) = @mem a.b.c.d.x = v
+# test508(a::A5,v::D5)      = @mem a.b.c.d = v
+# test509(a::A5,v::Float32) = @mem a.b.c.x = v
+# test510(a::A5,v::C5)      = @mem a.b.c = v
+# test511(a::A5,v::Float32) = @mem a.b.x = v
+# test512(a::A5,v::B5)      = @mem a.b = v
+# test513(a::A5,v::Float32) = @mem a.x = v
+# test514(a::A5,v::A5)      = @mem a = v
 #
 #             v  = 0f0
 #             v += 1f0; @assert a5.b.c.d.e[].f.g.x != v;             test501(a5,v);             @assert a5.b.c.d.e[].f.g.x == v
@@ -517,23 +517,23 @@ code_native(io,test414b,(A4,A4))     ; display_asm_stat_io(io) # (total = 3, mov
 
 ################################################################################
 
-# @macroexpand @mutate a.b.c.d = v
+# @macroexpand @mem a.b.c.d = v
 # a,v = (a2,D2(v,e2))
 #
-# @macroexpand @mutate a.b.c.d.e.f.g.x = v
+# @macroexpand @mem a.b.c.d.e.f.g.x = v
 # a,v = (a2,v)
 #
-# @macroexpand @mutate a[].b.c.d.e.f.g.x = v
+# @macroexpand @mem a[].b.c.d.e.f.g.x = v
 # a,v = (a3r,v)
 #
-# @macroexpand @mutate a[] = v
+# @macroexpand @mem a[] = v
 # a,v = (a3r,A3(v,b3))
 #
-# @macroexpand @mutate a.b = v
+# @macroexpand @mem a.b = v
 # a,v = (a2,B2(v,c2))
 #
-# @macroexpand @mutate a[][][].b.c.d.e.f.g.x = v
+# @macroexpand @mem a[][][].b.c.d.e.f.g.x = v
 # a,v = (a3rrr,v)
 #
-# @macroexpand @mutate a.b.c.d.e[].f.g.x = v
+# @macroexpand @mem a.b.c.d.e[].f.g.x = v
 # a,v = (a4,v)
