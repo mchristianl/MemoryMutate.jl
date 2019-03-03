@@ -2,6 +2,7 @@ module MemoryMutate
   export @mutate
 
   # TODO: may fuse fieldindex_generated, fieldisbitstype_generated and fieldisimmutable_generated into a single function
+  # TODO: spread a few assertions with descriptive error messages
 
   # statically unroll the cases for all fieldnames of T
   @generated function (fieldindex_generated(v::T, f::Symbol)::UInt64) where T
@@ -139,7 +140,7 @@ module MemoryMutate
       if levels[n] == nothing # the current level's value is obtained via dereferencing `[]` the previous level's value
         push!(expr_val,:( $(sym_val[n]) = $(sym_val[n-1])[] )) # do the dereferencing `[]` to obtain a value
       else # the current level's value is obtained via a symbol from the previous level's value
-        push!(expr_val,:( $(sym_val[n]) = getfield($(sym_val[n-1]), $(sym_fld[n-1])) )) # do so with `getfield`
+        push!(expr_val,:( $(sym_val[n]) = getfield($(sym_val[n-1]), $(sym_fld[n-1])) )) # TODO: do so with `getfield`
       end
         push!(expr_mut,:( $(sym_mut[n]) = $ismutable_static($(sym_val[n]))     ))
         push!(expr_ref,:( $(sym_ref[n]) = $isreference_static($(sym_val[n-1])) ))

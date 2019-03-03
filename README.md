@@ -1,24 +1,26 @@
 
 ## MemoryMutate
 
-A macro `@mutate` is provided for multi-_level_ assignments `a.b.c.d.e = v` that uses `fieldoffset` to calculate the offset of the to-be-assigned field relative to the rightmost mutable _level_ and uses `pointer_from_objref` on that rightmost mutable _level_, adds the offset to that pointer and uses `unsafe_store!` to write the value. This compiles down to a few `mov` assembly instructions.
+WARNING: This is a proof of conept and it's underlying assumptions need additional validation.
 
-This is a different approach then replacing the whole immutable with a new, modified one
+A macro `@mutate` is provided for multi-_level_ assignments `a.b.c.d.e = v` that uses `fieldoffset` to calculate the memory offset of the to-be-assigned field relative to the rightmost mutable _level_ and uses `pointer_from_objref` on that rightmost mutable _level_, adds this offset to the obtained pointer and uses `unsafe_store!` to write the value to that memory location. It compiles down to a few `mov` assembly instructions, if the types and symbols are statically determinable.
+
+This is a **different** approach then replacing the whole immutable of the right-most mutable with a new, modified one, as in
 
 1. Julep: setfield! for mutable references to immutables
   https://github.com/JuliaLang/julia/issues/17115
-  - "we propose making it possible to have setfield! modify fields inside of immutable objects that are wrapped in mutable objects"
-  - "To support this proposal, the setfield! function will get a multi-arg form, with the following behaviors:"
-    "setfield!(x, a, b, c, value) mutates the right most mutable object to change the value of its fields to be"
-    "equivalent to copying the immutable objects and updating the referenced field."
-  - "tl;dr The syntax:"
-    "x.a.b.c = 3"
-    "would now be valid, as long as at least one of the referenced fields is mutable."
+  - _we propose making it possible to have setfield! modify fields inside of immutable objects that are wrapped in mutable objects_
+  - _To support this proposal, the setfield! function will get a multi-arg form, with the following behaviors:_
+    _setfield!(x, a, b, c, value) mutates the right most mutable object to change the value of its fields to be_
+    _equivalent to copying the immutable objects and updating the referenced field._
+  - _tl;dr The syntax:_
+    _x.a.b.c = 3_
+    _would now be valid, as long as at least one of the referenced fields is mutable._
 2. WIP: Make mutating immutables easier
   https://github.com/JuliaLang/julia/pull/21912
   - proposes an @ operator as in `x@a = 2` for an immutable `x`
-  - "The ways this works is that under the hood, it creates a new immutable object with the specified field modified and then assigns it back to the appropriate place."
-    "Syntax wise, everything to the left of the @ is what's being assigned to, everything to the right of the @ is what is to be modified."
+  - _The ways this works is that under the hood, it creates a new immutable object with the specified field modified and then assigns it back to the appropriate place._
+    _Syntax wise, everything to the left of the @ is what's being assigned to, everything to the right of the @ is what is to be modified._
 
 There are two important justifications to make on which this approach relies:
 1. That immutables, allocated with `Ref` must not be assumed to stay constant when using `unsafe_store!`.
@@ -167,3 +169,16 @@ since we assume that these immutables do not need to stay _constant_, we can rep
 @mutate v.p.x = 5f0
 v # Vmutbl(Pconst(5.0f0, 3.0f0), Cconst(0.0f0, 1.0f0, 0.0f0))
 ```
+
+More examples might be extracted from [test/mutate.jl](./test/mutate.jl).
+
+### Implementation status
+
+Already implemented features:
+- written out `getfield` is considered, as in `getfield(a.b.c,:d).e =v`
+- written out dereferencing with `[]` is considered, as in `a.b.c[].d = v`
+
+To be done:
+- currently we use `getfield` for `.` instead of `getproperty` (`getproperty` is what is called by `.`)
+- `+=` operations and similiar
+- continuous array indexing `a[10] = v`, e.g. for static arrays
