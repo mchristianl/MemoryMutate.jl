@@ -188,10 +188,11 @@ test214(a::A2,v::A2)      = @mem a = v
             v += 1f0; @assert a2.b.c.d.e.x     != v;        test205(a2,v);        @assert a2.b.c.d.e.x     == v
             v += 1f0; @assert a2.b.c.d.e       != E2(v,f2); test206(a2,E2(v,f2)); @assert a2.b.c.d.e       == E2(v,f2)
             v += 1f0; @assert a2.b.c.d.x       != v;        test207(a2,v);        @assert a2.b.c.d.x       == v
-try; global v += 1f0; @assert a2.b.c.d         != D2(v,e2); test208(a2,D2(v,e2)); @assert a2.b.c.d         == D2(v,e2); catch e; display(e); end
-try; global v += 1f0; @assert a2.b.c.x         != v;        test209(a2,v);        @assert a2.b.c.x         == v       ; catch e; display(e); end
-try; global v += 1f0; @assert a2.b.c           != C2(v,d2); test210(a2,C2(v,d2)); @assert a2.b.c           == C2(v,d2); catch e; display(e); end
-try; global v += 1f0; @assert a2.b.x           != v;        test211(a2,v);        @assert a2.b.x           == v       ; catch e; display(e); end
+try; global v += 1f0; @assert a2.b.c.d         != D2(v,e2); test208(a2,D2(v,e2)); @assert a2.b.c.d.x       == D2(v,e2).x # mutables with equal field values are not equal
+                                                                                  @assert a2.b.c.d.e       == D2(v,e2).e; catch e; print(e); end
+try; global v += 1f0; @assert a2.b.c.x         != v;        test209(a2,v);        @assert a2.b.c.x         == v         ; catch e; print(e); end
+try; global v += 1f0; @assert a2.b.c           != C2(v,d2); test210(a2,C2(v,d2)); @assert a2.b.c           == C2(v,d2)  ; catch e; print(e); end
+try; global v += 1f0; @assert a2.b.x           != v;        test211(a2,v);        @assert a2.b.x           == v         ; catch e; print(e); end
             v += 1f0; @assert a2.b             != B2(v,c2); test212(a2,B2(v,c2)); @assert a2.b             == B2(v,c2)
             v += 1f0; @assert a2.x             != v;        test213(a2,v);        @assert a2.x             == v
             v += 1f0; @assert a2               != A2(v,b2); test214(a2,A2(v,b2)); # @assert a1               == A2(v,b2) # call by "sharing"
@@ -203,10 +204,10 @@ code_native(io,test204,(A2,F2))     ; display_asm_stat_io(io) # (total = 9, movs
 code_native(io,test205,(A2,Float32)); display_asm_stat_io(io) # (total = 5, movs = 4, mov = 3, vmov = 1)
 code_native(io,test206,(A2,E2))     ; display_asm_stat_io(io) # (total = 14, movs = 12, mov = 12, vmov = 0)
 code_native(io,test207,(A2,Float32)); display_asm_stat_io(io) # (total = 5, movs = 4, mov = 3, vmov = 1)
-# code_native(io,test208,(A2,D2))     ; display_asm_stat_io(io)
-# code_native(io,test209,(A2,Float32)); display_asm_stat_io(io)
-# code_native(io,test210,(A2,C2))     ; display_asm_stat_io(io)
-# code_native(io,test211,(A2,Float32)); display_asm_stat_io(io)
+code_native(io,test208,(A2,D2))     ; display_asm_stat_io(io) # (total = 7, movs = 6, mov = 6, vmov = 0)
+code_native(io,test209,(A2,Float32)); display_asm_stat_io(io) # (total = 28, movs = 18, mov = 15, vmov = 3)
+code_native(io,test210,(A2,C2))     ; display_asm_stat_io(io) # (total = 18, movs = 15, mov = 14, vmov = 1)
+code_native(io,test211,(A2,Float32)); display_asm_stat_io(io) # (total = 26, movs = 17, mov = 14, vmov = 3)
 code_native(io,test212,(A2,B2))     ; display_asm_stat_io(io) # (total = 24, movs = 8, mov = 8, vmov = 0)
 code_native(io,test213,(A2,Float32)); display_asm_stat_io(io) # (total = 2, movs = 1, mov = 0, vmov = 1)
 code_native(io,test214,(A2,A2))     ; display_asm_stat_io(io) # (total = 3, movs = 2, mov = 2, vmov = 0)
@@ -369,11 +370,12 @@ test414(a::A4,v::A4)      = @mem a = v
             v += 1f0; @assert a4.b.c.d.e[].f     != F4(v,g4);      test404(a4,F4(v,g4));      @assert a4.b.c.d.e[].f     == F4(v,g4)
             v += 1f0; @assert a4.b.c.d.e[].x     != v;             test405(a4,v);             @assert a4.b.c.d.e[].x     == v
             v += 1f0; @assert a4.b.c.d.e[]       != E4(v,f4);      test406(a4,E4(v,f4));      @assert a4.b.c.d.e[]       == E4(v,f4)
-try; global v += 1f0; @assert a4.b.c.d.x         != v;             test407(a4,v);             @assert a4.b.c.d.x         == v            ; catch e; display(e); end
-try; global v += 1f0; @assert a4.b.c.d           != D4(v,Ref(e4)); test408(a4,D4(v,Ref(e4))); @assert a4.b.c.d           == D4(v,Ref(e4)); catch e; display(e); end
-try; global v += 1f0; @assert a4.b.c.x           != v;             test409(a4,v);             @assert a4.b.c.x           == v            ; catch e; display(e); end
-try; global v += 1f0; @assert a4.b.c             != C4(v,d4);      test410(a4,C4(v,d4));      @assert a4.b.c             == C4(v,d4)     ; catch e; display(e); end
-try; global v += 1f0; @assert a4.b.x             != v;             test411(a4,v);             @assert a4.b.x             == v            ; catch e; display(e); end
+try; global v += 1f0; @assert a4.b.c.d.x         != v;             test407(a4,v);             @assert a4.b.c.d.x         == v            ; catch e; print(e); end
+try; global v += 1f0; @assert a4.b.c.d           != D4(v,Ref(e4)); test408(a4,D4(v,Ref(e4))); @assert a4.b.c.d.e[]       == e4           # references to equal immutables are not equal
+                                                                                              @assert a4.b.c.d.x         == v            ; catch e; print(e); end
+try; global v += 1f0; @assert a4.b.c.x           != v;             test409(a4,v);             @assert a4.b.c.x           == v            ; catch e; print(e); end
+try; global v += 1f0; @assert a4.b.c             != C4(v,d4);      test410(a4,C4(v,d4));      @assert a4.b.c             == C4(v,d4)     ; catch e; print(e); end
+try; global v += 1f0; @assert a4.b.x             != v;             test411(a4,v);             @assert a4.b.x             == v            ; catch e; print(e); end
             v += 1f0; @assert a4.b               != B4(v,c4);      test412(a4,B4(v,c4));      @assert a4.b               == B4(v,c4)
             v += 1f0; @assert a4.x               != v;             test413(a4,v);             @assert a4.x               == v
             v += 1f0; @assert a4                 != A4(v,b4);      test414(a4,A4(v,b4));      # @assert a4               == A4(v,b4) # call by "sharing"
@@ -384,11 +386,11 @@ code_native(io,test403,(A4,Float32)); display_asm_stat_io(io) # (total = 6, movs
 code_native(io,test404,(A4,F4))     ; display_asm_stat_io(io) # (total = 9, movs = 8, mov = 6, vmov = 2)
 code_native(io,test405,(A4,Float32)); display_asm_stat_io(io) # (total = 6, movs = 5, mov = 4, vmov = 1)
 code_native(io,test406,(A4,E4))     ; display_asm_stat_io(io) # (total = 15, movs = 13, mov = 13, vmov = 0)
-# code_native(io,test407,(A4,Float32)); display_asm_stat_io(io)
-# code_native(io,test408,(A4,D4))     ; display_asm_stat_io(io)
-# code_native(io,test409,(A4,Float32)); display_asm_stat_io(io)
-# code_native(io,test410,(A4,C4))     ; display_asm_stat_io(io)
-# code_native(io,test411,(A4,Float32)); display_asm_stat_io(io)
+code_native(io,test407,(A4,Float32)); display_asm_stat_io(io) # (total = 29, movs = 19, mov = 16, vmov = 3)
+code_native(io,test408,(A4,D4))     ; display_asm_stat_io(io) # (total = 19, movs = 16, mov = 15, vmov = 1)
+code_native(io,test409,(A4,Float32)); display_asm_stat_io(io) # (total = 28, movs = 18, mov = 15, vmov = 3)
+code_native(io,test410,(A4,C4))     ; display_asm_stat_io(io) # (total = 18, movs = 15, mov = 14, vmov = 1)
+code_native(io,test411,(A4,Float32)); display_asm_stat_io(io) # (total = 26, movs = 17, mov = 14, vmov = 3)
 code_native(io,test412,(A4,B4))     ; display_asm_stat_io(io) # (total = 24, movs = 8, mov = 8, vmov = 0)
 code_native(io,test413,(A4,Float32)); display_asm_stat_io(io) # (total = 2, movs = 1, mov = 0, vmov = 1)
 code_native(io,test414,(A4,A4))     ; display_asm_stat_io(io) # (total = 3, movs = 2, mov = 2, vmov = 0)
@@ -425,11 +427,12 @@ test414b(a::A4,v::A4)      = @mem a = v
             v += 1f0; @assert a4.b.c.d.e.x.f     != F4(v,g4);      test404b(a4,F4(v,g4));      @assert a4.b.c.d.e.x.f     == F4(v,g4)
             v += 1f0; @assert a4.b.c.d.e.x.x     != v;             test405b(a4,v);             @assert a4.b.c.d.e.x.x     == v
             v += 1f0; @assert a4.b.c.d.e.x       != E4(v,f4);      test406b(a4,E4(v,f4));      @assert a4.b.c.d.e.x       == E4(v,f4)
-try; global v += 1f0; @assert a4.b.c.d.x         != v;             test407b(a4,v);             @assert a4.b.c.d.x         == v            ;  catch e; display(e); end
-try; global v += 1f0; @assert a4.b.c.d           != D4(v,Ref(e4)); test408b(a4,D4(v,Ref(e4))); @assert a4.b.c.d           == D4(v,Ref(e4));  catch e; display(e); end
-try; global v += 1f0; @assert a4.b.c.x           != v;             test409b(a4,v);             @assert a4.b.c.x           == v            ;  catch e; display(e); end
-try; global v += 1f0; @assert a4.b.c             != C4(v,d4);      test410b(a4,C4(v,d4));      @assert a4.b.c             == C4(v,d4)     ;  catch e; display(e); end
-try; global v += 1f0; @assert a4.b.x             != v;             test411b(a4,v);             @assert a4.b.x             == v            ;  catch e; display(e); end
+try; global v += 1f0; @assert a4.b.c.d.x         != v;             test407b(a4,v);             @assert a4.b.c.d.x         == v            ;  catch e; print(e); end
+try; global v += 1f0; @assert a4.b.c.d           != D4(v,Ref(e4)); test408b(a4,D4(v,Ref(e4))); @assert a4.b.c.d.e[]       == e4           # references to equal immutables are not equal
+                                                                                               @assert a4.b.c.d.x         == v            ;  catch e; print(e); end
+try; global v += 1f0; @assert a4.b.c.x           != v;             test409b(a4,v);             @assert a4.b.c.x           == v            ;  catch e; print(e); end
+try; global v += 1f0; @assert a4.b.c             != C4(v,d4);      test410b(a4,C4(v,d4));      @assert a4.b.c             == C4(v,d4)     ;  catch e; print(e); end
+try; global v += 1f0; @assert a4.b.x             != v;             test411b(a4,v);             @assert a4.b.x             == v            ;  catch e; print(e); end
             v += 1f0; @assert a4.b               != B4(v,c4);      test412b(a4,B4(v,c4));      @assert a4.b               == B4(v,c4)
             v += 1f0; @assert a4.x               != v;             test413b(a4,v);             @assert a4.x               == v
             v += 1f0; @assert a4                 != A4(v,b4);      test414b(a4,A4(v,b4));      # @assert a4               == A4(v,b4) # call by "sharing"
@@ -440,11 +443,11 @@ code_native(io,test403b,(A4,Float32)); display_asm_stat_io(io) # (total = 6, mov
 code_native(io,test404b,(A4,F4))     ; display_asm_stat_io(io) # (total = 9, movs = 8, mov = 6, vmov = 2)
 code_native(io,test405b,(A4,Float32)); display_asm_stat_io(io) # (total = 6, movs = 5, mov = 4, vmov = 1)
 code_native(io,test406b,(A4,E4))     ; display_asm_stat_io(io) # (total = 15, movs = 13, mov = 13, vmov = 0)
-# code_native(io,test407b,(A4,Float32)); display_asm_stat_io(io)
-# code_native(io,test408b,(A4,D4))     ; display_asm_stat_io(io)
-# code_native(io,test409b,(A4,Float32)); display_asm_stat_io(io)
-# code_native(io,test410b,(A4,C4))     ; display_asm_stat_io(io)
-# code_native(io,test411b,(A4,Float32)); display_asm_stat_io(io)
+code_native(io,test407b,(A4,Float32)); display_asm_stat_io(io) # (total = 29, movs = 19, mov = 16, vmov = 3)
+code_native(io,test408b,(A4,D4))     ; display_asm_stat_io(io) # (total = 19, movs = 16, mov = 15, vmov = 1)
+code_native(io,test409b,(A4,Float32)); display_asm_stat_io(io) # (total = 28, movs = 18, mov = 15, vmov = 3)
+code_native(io,test410b,(A4,C4))     ; display_asm_stat_io(io) # (total = 18, movs = 15, mov = 14, vmov = 1)
+code_native(io,test411b,(A4,Float32)); display_asm_stat_io(io) # (total = 26, movs = 17, mov = 14, vmov = 3)
 code_native(io,test412b,(A4,B4))     ; display_asm_stat_io(io) # (total = 24, movs = 8, mov = 8, vmov = 0)
 code_native(io,test413b,(A4,Float32)); display_asm_stat_io(io) # (total = 2, movs = 1, mov = 0, vmov = 1)
 code_native(io,test414b,(A4,A4))     ; display_asm_stat_io(io) # (total = 3, movs = 2, mov = 2, vmov = 0)
@@ -492,10 +495,10 @@ code_native(io,test414b,(A4,A4))     ; display_asm_stat_io(io) # (total = 3, mov
 #             v += 1f0; @assert a5.b.c.d.e[].x     != v;             test505(a5,v);             @assert a5.b.c.d.e[].x     == v
 #             v += 1f0; @assert a5.b.c.d.e[]       != E5(v,f5);      test506(a5,E5(v,f5));      @assert a5.b.c.d.e[]       == E5(v,f5)
 #             v += 1f0; @assert a5.b.c.d.x         != v;             test507(a5,v);             @assert a5.b.c.d.x         == v
-# try; global v += 1f0; @assert a5.b.c.d           != D5(v,Ref(e5)); test508(a5,D5(v,Ref(e5))); @assert a5.b.c.d           == D5(v,Ref(e5)); catch e; display(e); end
-# try; global v += 1f0; @assert a5.b.c.x           != v;             test509(a5,v);             @assert a5.b.c.x           == v            ; catch e; display(e); end
-# try; global v += 1f0; @assert a5.b.c             != C5(v,d5);      test510(a5,C5(v,d5));      @assert a5.b.c             == C5(v,d5)     ; catch e; display(e); end
-# try; global v += 1f0; @assert a5.b.x             != v;             test511(a5,v);             @assert a5.b.x             == v            ; catch e; display(e); end
+# try; global v += 1f0; @assert a5.b.c.d           != D5(v,Ref(e5)); test508(a5,D5(v,Ref(e5))); @assert a5.b.c.d           == D5(v,Ref(e5)); catch e; print(e); end
+# try; global v += 1f0; @assert a5.b.c.x           != v;             test509(a5,v);             @assert a5.b.c.x           == v            ; catch e; print(e); end
+# try; global v += 1f0; @assert a5.b.c             != C5(v,d5);      test510(a5,C5(v,d5));      @assert a5.b.c             == C5(v,d5)     ; catch e; print(e); end
+# try; global v += 1f0; @assert a5.b.x             != v;             test511(a5,v);             @assert a5.b.x             == v            ; catch e; print(e); end
 #             v += 1f0; @assert a5.b               != B5(v,c5);      test512(a5,B5(v,c5));      @assert a5.b               == B5(v,c5)
 #             v += 1f0; @assert a5.x               != v;             test513(a5,v);             @assert a5.x               == v
 #             v += 1f0; @assert a5                 != A5(v,b5);      test514(a5,A5(v,b5));      # @assert a5               == A5(v,b5) # call by "sharing"
@@ -517,6 +520,9 @@ code_native(io,test414b,(A4,A4))     ; display_asm_stat_io(io) # (total = 3, mov
 
 ################################################################################
 
+# @macroexpand @mem a.b.c.d.e.f.g.x = v
+# a,v = (a1,v)
+#
 # @macroexpand @mem a.b.c.d = v
 # a,v = (a2,D2(v,e2))
 #
@@ -540,3 +546,6 @@ code_native(io,test414b,(A4,A4))     ; display_asm_stat_io(io) # (total = 3, mov
 #
 # @macroexpand @mem a.b.c.d = v
 # a,v = (a2,D2(v,e2))
+#
+# @macroexpand @mem a.b.c.d = v
+# a,v = (a4,D4(v,Ref(e4)))

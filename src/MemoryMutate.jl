@@ -46,6 +46,72 @@ module MemoryMutate
   isreference_static(::T) where T = T <: Ref
   fieldoffset_static(::T, i::UInt64) where T = fieldoffset(T,i)
 
+
+  # TODO: one would have to recover the pointers, beginning with the first
+  const accumulatePointers = true
+  const writeReferences = true
+  const reallocateImmutableRHSpointer = true
+  @generated function unsafe_store_generated2(::T,f::Symbol,base::B,off::UInt64,rhs::R,ptr::P) where {T,B,R,P<:Union{Ptr{Nothing},Nothing}}
+    exprs = []
+    sym_tmp = gensym("tmp")
+    for (n,fA) in enumerate(fieldnames(T))
+      action = :()
+      if B.mutable # B is mutable, so `pointer_from_objref(base)` is valid
+        if isbitstype(fieldtypes(T)[n]) # write a bitstype into the memory of `base`
+          action = :( @GC.preserve base unsafe_store!(reinterpret(Ptr{$(fieldtypes(T)[n])},pointer_from_objref(base)+off),rhs) )
+        elseif (@__MODULE__).writeReferences # write a reference into the memory of `base`
+          # if the field we want to write to is not a bitstype, then we end up with it's parent as the `base`
+          # in that case, we are at the second-to-last level, where the normal assignment can be used
+          # so we do not see this case
+          action = :( @assert isa(rhs,$(fieldtypes(T)[n])) "The value to assign is of type '$($(R))', but the field to assign it to is of type '$($(fieldtypes(T)[n]))'";
+            @GC.preserve base unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},pointer_from_objref(base)+off),pointer_from_objref(rhs)) )
+        else
+          # we do not see this case either
+          action = :(throw("""
+            From type '$($T)' the field '$($(QuoteNode(fA)))' is of type '$(fieldtypes(T)[n])' and it is located in type '$($(B))' at offset $(off).
+            The field type '$(fieldtypes(T)[n])' is a non-bitstype. You need to set 'writeReferences = true' to enable this operation.
+            """))
+        end
+      elseif accumulatePointers # B is immutable, so we cannot use `pointer_from_objref(base)` and use an accumulated pointer instead
+        if P != Nothing # if we have such pointer, we can use it
+          if isbitstype(fieldtypes(T)[n]) # write a bitstype into the memory at `ptr`
+            action = :( @GC.preserve base unsafe_store!(reinterpret(Ptr{$(fieldtypes(T)[n])},ptr),rhs) )
+          elseif writeReferences # write a reference into the memory at `ptr`
+            if fieldtypes(T)[n].mutable # `rhs` is already allocated and `pointer_from_objref(rhs)` is valid
+              action = :( @assert isa(rhs,$(fieldtypes(T)[n])) "The value to assign is of type '$($(R))', but the field to assign it to is of type '$($(fieldtypes(T)[n]))'";
+                @GC.preserve base unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},ptr),pointer_from_objref(rhs)) )
+            elseif reallocateImmutableRHSpointer # we need to allocate `rhs` with `Ref`
+              action = :( @assert isa(rhs,$(fieldtypes(T)[n])) "The value to assign is of type '$($(R))', but the field to assign it to is of type '$($(fieldtypes(T)[n]))'";
+                $sym_tmp = Ref(rhs);
+                @GC.preserve base $sym_tmp unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},ptr),unsafe_load(reinterpret(Ptr{Ptr{Nothing}},pointer_from_objref($sym_tmp)))) )
+            else
+              action = :(throw("""
+              The given right hand side is of type '$($(R))' which is an immutable non-isbitstype.
+              You need to set 'reallocateImmutableRHSpointer = true' to enable this operation.
+              """))
+            end
+          else
+            action = :(throw("""
+            From type '$($T)' the field '$($(QuoteNode(fA)))' is of type '$($(fieldtypes(T)[n]))' and it is located in type '$($(B))' at offset $(off).
+            This is a non-bitstype. You need to set 'writeReferences = true' to enable this operation.
+            """))
+          end
+        else
+          action = :(throw("""There is neither a reference, nor a mutable present in the assigment to be used as a base pointer."""))
+        end
+      else
+        action = :(throw("""
+          From type '$($T)' the field '$($(QuoteNode(fA)))' is of type '$($(fieldtypes(T)[n]))' and it is located in type '$($(B))' at offset $(off).
+          The base type '$($(B))' is immutable. You need to set 'accumulatePointers = true' to enable this operation.
+          """))
+      end
+      push!(exprs,:( f == $(QuoteNode(fA)) && ($action) ))
+    end
+    return Expr(:block,exprs...)
+  end
+  # fallback for assigning references
+  unsafe_store_generated2(::T,::Nothing,base,basebase,off::UInt64,rhs) where T = (base[] = rhs) # @assert isa(base,Ref), @assert off == 0
+
   # unroll the cases for all fieldnames of T
   @generated function unsafe_store_generated(::T,f::Symbol,base,off::UInt64,rhs) where T
     exprs = []
@@ -70,6 +136,13 @@ module MemoryMutate
   setfield_or_deref(x::T,f::Symbol,rhs) where T = setfield!(x,f,rhs)
   setfield_or_deref(x::T,::Nothing,rhs) where T = (x[] = rhs)
   fieldtype_static(::T, f::Symbol) where T = fieldtype(T,f)
+
+  @generated function fieldpointer_static(basebase,base::T,off::UInt64,prev::Ptr{Nothing})::Ptr{Nothing} where T
+    return T.mutable ? :( pointer_from_objref(base)+off ) : :( @GC.preserve basebase unsafe_load(reinterpret(Ptr{Ptr{Nothing}},prev))+off )
+  end
+  @generated function fieldpointer_static(basebase,base::T,off::UInt64,::Nothing) where T
+    return T.mutable ? :( pointer_from_objref(base)+off ) : :( nothing )
+  end
 
   # structinfo(T) = [(fieldoffset(T,i), fieldname(T,i), fieldtype(T,i)) for i = 1:fieldcount(T)];
   macro mem(expr)
@@ -98,6 +171,7 @@ module MemoryMutate
 
     # for each level, generate symbols to hold
     sym_val = [] # every level produces the parent-value for the next level
+    sym_ptr = [] # the cumulated pointer from the first mutable/reference
     # sym_typ = [] # the type of `val`. It turned out, that it's necessary to use generic or generated functions to obtain compiler constants for the type's properties instead of using the type directly. That is why we introduce `fld`, `idx`, `bit`, `ref` and `mut`.
     sym_ref = [] # a Bool, whether the type of `val` is mutable
     sym_mut = [] # a Bool, whether the type of `val` is a reference type
@@ -107,6 +181,7 @@ module MemoryMutate
     sym_off = [] # if there is a `fld` symbol, then this is a UInt64 which accumulates the offsets of previous levels and "resets" every time we hit a non-bitstype
     for m = length(levels):-1:1
       pushfirst!(sym_val,gensym("val$(m)"))
+      pushfirst!(sym_ptr,gensym("ptr$(m)"))
       # pushfirst!(sym_typ,gensym("typ$(m)"))
       pushfirst!(sym_fld,gensym("fld$(m)"))
       pushfirst!(sym_idx,gensym("idx$(m)"))
@@ -120,6 +195,7 @@ module MemoryMutate
     expr_val = [:( $(sym_val[1]) = $(levels[1])                       )]
     expr_mut = [:( $(sym_mut[1]) = $ismutable_static($(sym_val[1]))   )]
     expr_ref = [:( $(sym_ref[1]) = $isreference_static($(sym_val[1])) )]
+    expr_fld = []
     expr_idx = []
     expr_bit = []
     expr_off = []
@@ -134,6 +210,7 @@ module MemoryMutate
       expr_bit = [:( $(sym_bit[1]) = $fieldisbitstype_generated($(sym_val[1]), $(sym_fld[1])) )]
       expr_off = [:( $(sym_off[1]) = $fieldoffset_static($(sym_val[1]), $(sym_idx[1]))        )]
     end
+    expr_ptr = [:( $(sym_ptr[1]) = $(sym_mut[1]) ? pointer_from_objref($(sym_val[1])) + $(sym_off[1]) : nothing )]
 
     # setting up the expressions to hold compiler constants: for the following levels
     for n=2:length(levels)-1 # every level, we "get" a value: either by dereferencing or by accessing a field
@@ -155,6 +232,7 @@ module MemoryMutate
         push!(expr_bit,:( $(sym_bit[n]) = $fieldisbitstype_generated($(sym_val[n]), $(sym_fld[n])) ))
         push!(expr_off,:( $(sym_off[n]) = $fieldoffset_static($(sym_val[n]), $(sym_idx[n])) + ($(sym_bit[n-1]) ? $(sym_off[n-1]) : UInt64(0)) ))
       end
+      push!(expr_ptr,:( $(sym_ptr[n]) = $fieldpointer_static($(sym_val[n-1]),$(sym_val[n]),$(sym_off[n]),$(sym_ptr[n-1])) ))
     end
 
     # https://github.com/JuliaLang/julia/issues/10578
@@ -171,6 +249,7 @@ module MemoryMutate
       push!(exprs,expr_bit[n])
       push!(exprs,expr_mut[n])
       push!(exprs,expr_off[n])
+      push!(exprs,expr_ptr[n])
     end
 
     # obtain the result
@@ -191,9 +270,13 @@ module MemoryMutate
     =#
 
     # the first level: use the first level's value as the base to assign at the second-to-last accumulated offset the `rhs` of the second-to-last field's type in the second-to-last value
+    # expr_str = :(
+    #     $(LineNumberNode(-1,"@val1+off$(length(levels)-1) <- val$(length(levels)-1)"))
+    #   ; $unsafe_store_generated($(sym_val[length(levels)-1]),$(sym_fld[length(levels)-1]),$(sym_val[1]),$(sym_off[length(levels)-1]),$sym_rhs)
+    #   )
     expr_str = :(
         $(LineNumberNode(-1,"@val1+off$(length(levels)-1) <- val$(length(levels)-1)"))
-      ; $unsafe_store_generated($(sym_val[length(levels)-1]),$(sym_fld[length(levels)-1]),$(sym_val[1]),$(sym_off[length(levels)-1]),$sym_rhs)
+      ; $unsafe_store_generated2($(sym_val[length(levels)-1]),$(sym_fld[length(levels)-1]),$(sym_val[1]),$(sym_off[length(levels)-1]),$sym_rhs,$(sym_ptr[1]))
       )
     if length(levels) == 2 # if the first level is the second-to-last level AND it is mutable, we can use the normal assignment
       expr_rec = :(
@@ -207,9 +290,13 @@ module MemoryMutate
 
     # the remaining levels: use the current level's value as the base to assign at the second-to-last accumulated offset the `rhs` of the second-to-last field's type in the second-to-last value
     for n=2:length(levels)-1
+      # expr_str = :(
+      #     $(LineNumberNode(-1,"@val$(n)+off$(length(levels)-1) <- val$(length(levels)-1)"))
+      #   ; $unsafe_store_generated($(sym_val[length(levels)-1]), $(sym_fld[length(levels)-1]), $(sym_val[n]), $(sym_off[length(levels)-1]),$sym_rhs)
+      #   )
       expr_str = :(
-          $(LineNumberNode(-1,"@val$(n)+off$(length(levels)-1) <- val$(length(levels)-1)"))
-        ; $unsafe_store_generated($(sym_val[length(levels)-1]), $(sym_fld[length(levels)-1]), $(sym_val[n]), $(sym_off[length(levels)-1]),$sym_rhs)
+            $(LineNumberNode(-1,"@val$(n)+off$(length(levels)-1) <- val$(length(levels)-1)"))
+          ; $unsafe_store_generated2($(sym_val[length(levels)-1]), $(sym_fld[length(levels)-1]), $(sym_val[n]), $(sym_off[length(levels)-1]),$sym_rhs,$(sym_ptr[n]))
         )
       if n == length(levels)-1 # if the current level is the second-to-last level AND it is mutable, we can use the normal assignment
         expr_rec = :( $(sym_bit[n-1]) # is the current level's value of bitstype?
