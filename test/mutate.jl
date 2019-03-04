@@ -537,3 +537,6 @@ code_native(io,test414b,(A4,A4))     ; display_asm_stat_io(io) # (total = 3, mov
 #
 # @macroexpand @mem a.b.c.d.e[].f.g.x = v
 # a,v = (a4,v)
+#
+# @macroexpand @mem a.b.c.d = v
+# a,v = (a2,D2(v,e2))

@@ -1,4 +1,4 @@
 name = "MemoryMutate"
-uuid = "0e1e89b8-3db2-11e9-3694-f9aa93f411d2"
+uuid = "a5f39ad1-fb6e-5f16-afbb-4d8233a49418"
 authors = ["Marcus Christian Lehmann <lehmann_ch@web.de>"]
-version = "0.1.0"
+version = "0.0.3"
