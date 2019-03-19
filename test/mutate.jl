@@ -165,20 +165,20 @@ c2 = C2(2.0f0,d2)
 b2 = B2(1.0f0,c2)
 a2 = A2(0.0f0,b2)
 
-test201(a::A2,v::Float32) = @mem a.b.c.d.e.f.g.x = v
-test202(a::A2,v::G2)      = @mem a.b.c.d.e.f.g = v
-test203(a::A2,v::Float32) = @mem a.b.c.d.e.f.x = v
-test204(a::A2,v::F2)      = @mem a.b.c.d.e.f = v
-test205(a::A2,v::Float32) = @mem a.b.c.d.e.x = v
-test206(a::A2,v::E2)      = @mem a.b.c.d.e = v
-test207(a::A2,v::Float32) = @mem a.b.c.d.x = v
-test208(a::A2,v::D2)      = @mem a.b.c.d = v
-test209(a::A2,v::Float32) = @mem a.b.c.x = v
-test210(a::A2,v::C2)      = @mem a.b.c = v
-test211(a::A2,v::Float32) = @mem a.b.x = v
-test212(a::A2,v::B2)      = @mem a.b = v
-test213(a::A2,v::Float32) = @mem a.x = v
-test214(a::A2,v::A2)      = @mem a = v
+test201(a::A2,v::Float32) = @mem  a.b.c.d.e.f.g.x = v
+test202(a::A2,v::G2)      = @mem  a.b.c.d.e.f.g = v
+test203(a::A2,v::Float32) = @mem  a.b.c.d.e.f.x = v
+test204(a::A2,v::F2)      = @mem  a.b.c.d.e.f = v
+test205(a::A2,v::Float32) = @mem  a.b.c.d.e.x = v
+test206(a::A2,v::E2)      = @mem  a.b.c.d.e = v
+test207(a::A2,v::Float32) = @mem  a.b.c.d.x = v
+test208(a::A2,v::D2)      = @yolo a.b.c.d = v
+test209(a::A2,v::Float32) = @yolo a.b.c.x = v
+test210(a::A2,v::C2)      = @yolo a.b.c = v
+test211(a::A2,v::Float32) = @yolo a.b.x = v
+test212(a::A2,v::B2)      = @mem  a.b = v
+test213(a::A2,v::Float32) = @mem  a.x = v
+test214(a::A2,v::A2)      = @mem  a = v
 
             v  = 0f0
             v += 1f0; @assert a2.b.c.d.e.f.g.x != v;        test201(a2,v);        @assert a2.b.c.d.e.f.g.x == v
@@ -348,20 +348,20 @@ c4 = C4(0.0f0,d4)
 b4 = B4(0.0f0,c4)
 a4 = A4(0.0f0,b4)
 
-test401(a::A4,v::Float32) = @mem a.b.c.d.e[].f.g.x = v
-test402(a::A4,v::G4)      = @mem a.b.c.d.e[].f.g = v
-test403(a::A4,v::Float32) = @mem a.b.c.d.e[].f.x = v
-test404(a::A4,v::F4)      = @mem a.b.c.d.e[].f = v
-test405(a::A4,v::Float32) = @mem a.b.c.d.e[].x = v
-test406(a::A4,v::E4)      = @mem a.b.c.d.e[] = v
-test407(a::A4,v::Float32) = @mem a.b.c.d.x = v
-test408(a::A4,v::D4)      = @mem a.b.c.d = v
-test409(a::A4,v::Float32) = @mem a.b.c.x = v
-test410(a::A4,v::C4)      = @mem a.b.c = v
-test411(a::A4,v::Float32) = @mem a.b.x = v
-test412(a::A4,v::B4)      = @mem a.b = v
-test413(a::A4,v::Float32) = @mem a.x = v
-test414(a::A4,v::A4)      = @mem a = v
+test401(a::A4,v::Float32) = @mem  a.b.c.d.e[].f.g.x = v
+test402(a::A4,v::G4)      = @mem  a.b.c.d.e[].f.g = v
+test403(a::A4,v::Float32) = @mem  a.b.c.d.e[].f.x = v
+test404(a::A4,v::F4)      = @mem  a.b.c.d.e[].f = v
+test405(a::A4,v::Float32) = @mem  a.b.c.d.e[].x = v
+test406(a::A4,v::E4)      = @mem  a.b.c.d.e[] = v
+test407(a::A4,v::Float32) = @yolo a.b.c.d.x = v
+test408(a::A4,v::D4)      = @yolo a.b.c.d = v
+test409(a::A4,v::Float32) = @yolo a.b.c.x = v
+test410(a::A4,v::C4)      = @yolo a.b.c = v
+test411(a::A4,v::Float32) = @yolo a.b.x = v
+test412(a::A4,v::B4)      = @mem  a.b = v
+test413(a::A4,v::Float32) = @mem  a.x = v
+test414(a::A4,v::A4)      = @mem  a = v
 
             v  = 0f0
             v += 1f0; @assert a4.b.c.d.e[].f.g.x != v;             test401(a4,v);             @assert a4.b.c.d.e[].f.g.x == v
@@ -405,20 +405,20 @@ c4 = C4(0.0f0,d4)
 b4 = B4(0.0f0,c4)
 a4 = A4(0.0f0,b4)
 
-test401b(a::A4,v::Float32) = @mem a.b.c.d.e.x.f.g.x = v
-test402b(a::A4,v::G4)      = @mem a.b.c.d.e.x.f.g = v
-test403b(a::A4,v::Float32) = @mem a.b.c.d.e.x.f.x = v
-test404b(a::A4,v::F4)      = @mem a.b.c.d.e.x.f = v
-test405b(a::A4,v::Float32) = @mem a.b.c.d.e.x.x = v
-test406b(a::A4,v::E4)      = @mem a.b.c.d.e.x = v
-test407b(a::A4,v::Float32) = @mem a.b.c.d.x = v
-test408b(a::A4,v::D4)      = @mem a.b.c.d = v
-test409b(a::A4,v::Float32) = @mem a.b.c.x = v
-test410b(a::A4,v::C4)      = @mem a.b.c = v
-test411b(a::A4,v::Float32) = @mem a.b.x = v
-test412b(a::A4,v::B4)      = @mem a.b = v
-test413b(a::A4,v::Float32) = @mem a.x = v
-test414b(a::A4,v::A4)      = @mem a = v
+test401b(a::A4,v::Float32) = @mem  a.b.c.d.e.x.f.g.x = v
+test402b(a::A4,v::G4)      = @mem  a.b.c.d.e.x.f.g = v
+test403b(a::A4,v::Float32) = @mem  a.b.c.d.e.x.f.x = v
+test404b(a::A4,v::F4)      = @mem  a.b.c.d.e.x.f = v
+test405b(a::A4,v::Float32) = @mem  a.b.c.d.e.x.x = v
+test406b(a::A4,v::E4)      = @mem  a.b.c.d.e.x = v
+test407b(a::A4,v::Float32) = @yolo a.b.c.d.x = v
+test408b(a::A4,v::D4)      = @yolo a.b.c.d = v
+test409b(a::A4,v::Float32) = @yolo a.b.c.x = v
+test410b(a::A4,v::C4)      = @yolo a.b.c = v
+test411b(a::A4,v::Float32) = @yolo a.b.x = v
+test412b(a::A4,v::B4)      = @mem  a.b = v
+test413b(a::A4,v::Float32) = @mem  a.x = v
+test414b(a::A4,v::A4)      = @mem  a = v
 
             v  = 0f0
             v += 1f0; @assert a4.b.c.d.e.x.f.g.x != v;             test401b(a4,v);             @assert a4.b.c.d.e.x.f.g.x == v
@@ -549,3 +549,20 @@ code_native(io,test414b,(A4,A4))     ; display_asm_stat_io(io) # (total = 3, mov
 #
 # @macroexpand @mem a.b.c.d = v
 # a,v = (a4,D4(v,Ref(e4)))
+#
+# @macroexpand @mem a[].b.c.d.e.f.g.x = v
+# a,v = (a3r,v)
+
+using StaticArrays
+
+m = SArray{Tuple{4,3,2},Int64,3,4*3*2}(1:4*3*2)
+r = Ref(m)
+
+@assert r[][1,1,2] == 13
+@mem r[][1,1,2] = 77
+@assert r[][1,1,2] == 77
+@assert r[][1,1,2] == unsafe_load(@ptr r[][1,1,2])
+
+@assert pointer_from_objref(r) == @nullptr r[][1,1,1]
+@nullptr r[][1,1,1]
+@ptr r[][1,1,2]
