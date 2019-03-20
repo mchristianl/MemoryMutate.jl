@@ -5,6 +5,7 @@ module MemoryMutate
   export @yolo
   export @ptr
   export @nullptr
+  export @typedptr
 
   # TODO: may fuse fieldindex_generated, fieldisbitstype_generated and fieldisimmutable_generated into a single function
   # TODO: spread a few assertions with descriptive error messages
@@ -398,9 +399,12 @@ module MemoryMutate
     return mem_helper(expr,:assignment,true,true,true)
   end
   macro ptr(expr)
-    return mem_helper(expr,:pointer,true,false,true)
+    return mem_helper(expr,:pointer,true,true,true)
   end
   macro nullptr(expr)
-    return :(reinterpret(Ptr{Nothing},$(mem_helper(expr,:pointer,true,false,true))))
+    return :(reinterpret(Ptr{Nothing},$(mem_helper(expr,:pointer,true,true,true))))
+  end
+  macro typedptr(type,expr)
+    return :(reinterpret(Ptr{$type},$(mem_helper(expr,:pointer,true,true,true))))
   end
 end

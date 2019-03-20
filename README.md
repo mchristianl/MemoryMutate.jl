@@ -1,11 +1,14 @@
+<style>
+.strike{ text-decoration:line-through; }
+</style>
 
-## MemoryMutate
+# MemoryMutate
 
-WARNING: This is a proof of conept and it's underlying assumptions need additional validation.
+_WARNING: This is a proof of conept and it's underlying assumptions need additional validation._
 
 A macro `@mem` is provided for multi-_level_ assignments `a.b.c.d.e = v` that uses `fieldoffset` to calculate the memory offset of the to-be-assigned field relative to the rightmost mutable _level_ and uses `pointer_from_objref` on that rightmost mutable _level_, adds this offset to the obtained pointer and uses `unsafe_store!` to write the value to that memory location. It compiles down to a few `mov` assembly instructions, if the types and symbols are statically determinable.
 
-This is a **different** approach then replacing the whole immutable of the right-most mutable with a new, modified one, as in
+This is a **different** approach then replacing the _whole_<sup>[1](#whole)</sup> immutable of the right-most mutable with a new, modified one, as in
 
 1. Julep: setfield! for mutable references to immutables
   https://github.com/JuliaLang/julia/issues/17115
@@ -28,7 +31,9 @@ There are two important justifications to make on which this approach relies:
 
 Furthermore, although the assignment becomes just a few `mov` assembly instructions, it is not quite clear which optimizations might break by using `unsafe_store!`.
 
-### Use case
+<a name="whole"><sup>[1]</sup></a> Conceptually the _whole_ - this might also get optimized to just a few `mov` instructions. The reason for this package is primarily C-interoperability.
+
+# Use case
 
 In order to wrap C/C++ libraries in Julia, it is necessary to represent the C-structs as Julia types of the same layout.
 That can be achieved for nested C-structs only with nested immutable Julia types (bitstypes).
@@ -115,7 +120,9 @@ A `Ref{VROverlayIntersectionResults_t}` will be passed to Julia's `ccall` and th
 
 Therefore we assume that immutables `x`, allocated on the heap via `Ref(x)` are not assumed to be constant anymore by Julia and one can modify them in a C-style way, i.e. modify any parts of the immutables memory.
 
-### What this module provides
+# What this module provides
+
+## `@mem`
 
 Consider the Julia immutable types `Pconst` and `Cconst`
 
@@ -170,19 +177,123 @@ since we assume that these immutables do not need to stay _constant_, we can rep
 v # Vmutbl(Pconst(5.0f0, 3.0f0), Cconst(0.0f0, 1.0f0, 0.0f0))
 ```
 
-More examples might be extracted from [test/mutate.jl](./test/mutate.jl).
+This currently also works for StaticArrays
 
-### Implementation status
+```julia
+mutable struct A
+   data :: SArray{Tuple{4,3,2},Float32,3,4*3*2}
+end
+
+a = A(1:4*3*2)
+# A( Float32[1.0  5.0  9.0;  2.0  6.0  10.0; 3.0  7.0  11.0; 4.0  8.0  12.0]
+#    Float32[13.0 17.0 21.0; 14.0 18.0 22.0; 15.0 19.0 23.0; 16.0 20.0 24.0])
+
+a.data[1,1,2] # 13.0
+@mem a.data[1,1,2] = 77f0 # 77.0
+a.data[1,1,2] # 77.0
+
+for I = CartesianIndices(a.data)
+  (x,y,z) = Tuple(I)
+  @mem a.data[x,y,z] = x+y+z
+end
+# A( Float32[3.0 4.0 5.0; 4.0 5.0 6.0; 5.0 6.0 7.0; 6.0 7.0 8.0]
+#    Float32[4.0 5.0 6.0; 5.0 6.0 7.0; 6.0 7.0 8.0; 7.0 8.0 9.0])
+```
+
+_More examples might be extracted from [test/mutate.jl](./test/mutate.jl)._
+
+## `@ptr`, `@nullptr`, `@ptrtyped`
+
+These macros determine a memory address just like `@mem` where
+- `@ptr` returns a `Ptr{X}` where `X` is the type of the value at that memory location
+- `@nullptr` just reinterprets `@ptr` to `Ptr{Nothing}`
+- `@ptrtyped` of `T` just reinterprets `@ptr` to `Ptr{T}`
+
+```julia
+using StaticArrays
+
+m = Ref(SVector{8,UInt8}(reverse([0xde, 0xad, 0xbe, 0xef, 0xba, 0xad, 0xf0, 0x0d])))
+unsafe_load(@ptr m[][8]) # 0xde
+unsafe_load(@ptr m[][7]) # 0xad
+unsafe_load(@typedptr UInt32 m[][3]) # 0xbeefbaad
+```
+
+_More examples might be extracted from [test/mutate.jl](./test/mutate.jl)._
+
+## `@yolo`
+
+_(experimental feature)_
+
+There are some cases where `@mem` is set up to refuse writing to memory by assertions, that are enabled for `@yolo`.
+
+```julia
+mutable struct C # mutable non-bitstype
+  x :: Float32
+end
+struct B # immmutable non-bitstype
+  x :: Float32
+  c :: C
+end
+mutable struct A # mutable non-bitstype
+  b :: B
+end
+
+c = C(1f0)
+b = B(2f0,c)
+a = A(b)
+
+a.b.x = 3f0 # ↯ ERROR: setfield! immutable struct of type B cannot be changed
+
+f(a::A, v::Float32) = @mem a.b.x = v
+
+f(a,3f0)
+# ↯ ERROR: From type 'B' the field 'x' is of type 'Float32' and it is located in type 'B' at offset 0.
+#          The base type 'B' is immutable.
+```
+
+Since `C` is a non-bitstype, this make `B` also a non-bitstype but since `B` is immutable, `pointer_from_objref` won't work.
+To obtain the memory location of `b`, `@yolo` interprets `b` _inside_ of `a` as a pointer to a `B` and uses that.
+
+```julia
+f(a::A, v::Float32) = @yolo a.b.x = v
+f(a,3f0)
+a.b.x # 3.00
+```
+
+In the same example, suppose we wanted to change `a.b.c` _inside_ of `a.b`
+
+```julia
+f(a::A, c::C) = @yolo a.b.c = c
+f(a,C(3f0))
+```
+
+From type `B` the field `c` is of type `C` and it is located in type `B` at offset 8.
+Since `C` is a non-bitstype, `@yolo` will use `pointer_from_objref` on the right hand side to obtain a pointer to that and then replace the reference to `c` _inside_ `a.b`.
+
+_WARNING: this probably produces memory leaks!_
+
+Finally, this right hand side `rhs` could be an immutable non-isbitstype, in which case `pointer_from_objref` does not work anymore.
+`@yolo` then uses `unsafe_load(reinterpret(Ptr{Ptr{Nothing}},pointer_from_objref(Ref(rhs))))` to obtain the pointer that will be assigned then.
+
+_WARNING: this probably produces memory leaks!_
+
+_More examples might be extracted from [test/mutate.jl](./test/mutate.jl)._
+
+# Implementation status
 
 Already implemented features:
 - written out `getfield` is considered, as in `getfield(a.b.c,:d).e =v`
 - written out dereferencing with `[]` is considered, as in `a.b.c[].d = v`
+- continuous array indexing `a[10] = v`, for StaticArrays
 
 To be done:
 - currently we use `getfield` for `.` instead of `getproperty` (`getproperty` is what is called by `.`)
 - `+=` operations and similiar
-- continuous array indexing `a[10] = v`, e.g. for static arrays
+- continuous array indexing `a[10] = v`, e.g. for .strike[static] arrays
 
-### Credits
+Known bugs:
+- a throwing `@mem` at repl-level produces `MethodError: Cannot 'convert' an object of type String to an object of type Symbol`
+
+# Credits
 
 … go to [andreasnoack](https://github.com/andreasnoack) for the instant advice, saving me a lot of time, [pfitzseb](https://github.com/pfitzseb) for the elaborate discussion and the #internals slack channel for their approval.

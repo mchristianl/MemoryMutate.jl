@@ -563,6 +563,45 @@ r = Ref(m)
 @assert r[][1,1,2] == 77
 @assert r[][1,1,2] == unsafe_load(@ptr r[][1,1,2])
 
+m = Ref(SVector{8,UInt8}(reverse([0xde, 0xad, 0xbe, 0xef, 0xba, 0xad, 0xf0, 0x0d])))
+unsafe_load(@ptr m[][8]) # 0xde
+unsafe_load(@ptr m[][7]) # 0xad
+unsafe_load(@typedptr UInt32 m[][3]) # 0xbeefbaad
+
 @assert pointer_from_objref(r) == @nullptr r[][1,1,1]
 @nullptr r[][1,1,1]
 @ptr r[][1,1,2]
+
+const B6 = SArray{Tuple{4,3,2},Float32,3,4*3*2}
+const A6 = Base.RefValue{B6}
+a = Ref(B6(1:4*3*2))
+
+test601(a :: A6, v :: Float32) = @mem a[][1,1,2] = v
+
+v = 77f0
+@assert a[][1,1,2] != v; test601(a,v); @assert a[][1,1,2] == v;
+
+code_native(io,test601,(A6,Float32)); display_asm_stat_io(io) # (total = 2, movs = 1, mov = 0, vmov = 1)
+
+const B6b = SArray{Tuple{4,3,2},Float32,3,4*3*2}
+mutable struct A6b
+   b :: B6b
+end
+
+b = B6b(1:4*3*2)
+a = A6b(b)
+
+test601b(a :: A6b, v :: Float32) = @mem a.b[1,1,2] = v
+test602b(a :: A6b, x :: Int64, y :: Int64, z :: Int64,  v :: Float32) = @mem a.b[x,y,z] = v
+
+v = 77f0
+x, y, z = 2, 1, 2
+@assert a.b[1,1,2] != v; test601b(a,v); @assert a.b[1,1,2] == v;
+@assert a.b[x,y,z] != v; test602b(a,x,y,z,v); @assert a.b[x,y,z] == v;
+
+code_native(io,test601b,(A6b,Float32));                   display_asm_stat_io(io) # (total = 2, movs = 1, mov = 0, vmov = 1)
+code_native(io,test602b,(A6b,Int64,Int64,Int64,Float32)); display_asm_stat_io(io) # (total = 5, movs = 1, mov = 0, vmov = 1)
+# leaq    (%rcx,%rcx,2), %rax
+# leaq    (%rsi,%rdx,4), %rcx
+# leaq    (%rcx,%rax,4), %rax
+# vmovss  %xmm0, -68(%rdi,%rax,4)
