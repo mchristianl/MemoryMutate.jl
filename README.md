@@ -1,6 +1,3 @@
-<style>
-.strike{ text-decoration:line-through; }
-</style>
 
 # MemoryMutate
 
@@ -289,7 +286,7 @@ Already implemented features:
 To be done:
 - currently we use `getfield` for `.` instead of `getproperty` (`getproperty` is what is called by `.`)
 - `+=` operations and similiar
-- continuous array indexing `a[10] = v`, e.g. for .strike[static] arrays
+- continuous array indexing `a[10] = v`, e.g. for ~~static~~ arrays
 
 Known bugs:
 - a throwing `@mem` at repl-level produces `MethodError: Cannot 'convert' an object of type String to an object of type Symbol`
