@@ -568,8 +568,8 @@ unsafe_load(@ptr m[][8]) # 0xde
 unsafe_load(@ptr m[][7]) # 0xad
 unsafe_load(@typedptr UInt32 m[][3]) # 0xbeefbaad
 
-@assert pointer_from_objref(r) == @nullptr r[][1,1,1]
-@nullptr r[][1,1,1]
+@assert pointer_from_objref(r) == @voidptr r[][1,1,1]
+@voidptr r[][1,1,1]
 @ptr r[][1,1,2]
 
 const B6 = SArray{Tuple{4,3,2},Float32,3,4*3*2}

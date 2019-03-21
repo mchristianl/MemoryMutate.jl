@@ -1,10 +1,15 @@
 module MemoryMutate
   using StaticArrays
 
+  # TODO:
+  #  undefined symbols weire error
+  #  allow C-like syntax a->b->c in @mem and @ptr
+  #    allow @mem to have no rhs then
+
   export @mem
   export @yolo
   export @ptr
-  export @nullptr
+  export @voidptr
   export @typedptr
 
   # TODO: may fuse fieldindex_generated, fieldisbitstype_generated and fieldisimmutable_generated into a single function
@@ -127,7 +132,7 @@ module MemoryMutate
       if T <: SArray
         push!(exprs,:( $action ))
       else
-        push!(exprs,:( f == $(QuoteNode(fname)) && ($action) ))
+        push!(exprs,:( f == $(QuoteNode(fname)) && return ($action) ))
       end
     end
     return Expr(:block,exprs...)
@@ -171,18 +176,18 @@ module MemoryMutate
     return c
   end
 
-  indexoffset_static(t) = Int64(0)
+  indexoffset_static(t,prev::Int64) = Int64(0)
   # @generated function (indexoffset_static(t::Array{T,N}, indices...) :: UInt64) where {T,N}
   #   sym = gensym()
   #   return :( $sym = strides(t); $() )
   # end
-  @generated function (indexoffset_static(t::SArray{E,T,N,M}, indices...) :: Int64) where {E,T,N,M}
+  @generated function (indexoffset_static(t::SArray{E,T,N,M}, prev::Int64, indices...) :: Int64) where {E,T,N,M}
     sym = gensym()
     dims = E.parameters
     strides = MemoryMutate.cumprod_SimpleVector(dims)
     elsize = sizeof(T)
     index = Expr(:call,:+,[:( (indices[$i]-1)*($s) ) for (i,s) in enumerate(strides)]...)
-    return :( $index * $elsize )
+    return :( prev + $index * $elsize )
   end
 
   @generated function fieldpointer_static(basebase,base::T,off::Int64,prev::Ptr{Nothing})::Ptr{Nothing} where T
@@ -191,6 +196,8 @@ module MemoryMutate
   @generated function fieldpointer_static(basebase,base::T,off::Int64,::Nothing) where T
     return T.mutable ? :( pointer_from_objref(base)+off ) : :( nothing )
   end
+
+  pointer_from_objref_typed(x :: T) where T = reinterpret(Ptr{T},pointer_from_objref(x))
 
   # # because pointer_from_objref is prohibited on immutables, we collect the pointers manually, beginning from the last occuring mutable
   # const accumulatePointers = true
@@ -203,7 +210,7 @@ module MemoryMutate
   # structinfo(T) = [(fieldoffset(T,i), fieldname(T,i), fieldtype(T,i)) for i = 1:getfieldcount(T)];
   function mem_helper(expr, mode :: Symbol = :assignment, accumulatePointers :: Bool = false, writeReferences :: Bool = false, reallocateImmutableRHSpointer :: Bool = false)
     if mode == :assignment
-      @assert expr.head == :(=) "Expression for mutating must be an assignment (=)."
+      @assert expr.head == :(=) "Expression for mutating must be an assignment (=)." # unless we use a->b->c
       RHS = expr.args[2]
       cur = expr.args[1]
     end
@@ -234,7 +241,7 @@ module MemoryMutate
     end
     pushfirst!(levels,cur)
     pushfirst!(cases,:getfield)
-    length(levels) <= 1 && return esc(expr)
+    length(levels) <= 1 && return mode == :pointer ? esc(:($pointer_from_objref_typed($expr))) : esc(expr)
 
     # for each level, generate symbols to hold
     sym_val = [] # every level produces the parent-value for the next level
@@ -272,7 +279,7 @@ module MemoryMutate
       expr_idx = [:( $(sym_idx[1]) = $(Expr(:tuple,levels[2]...))         )]
       expr_bit = [:( $(sym_bit[1]) = $refisbitstype_static($(sym_val[1])) )]
       # expr_off = [:( $(sym_off[1]) = UInt64(0)                            )]
-      expr_off = [:( $(sym_off[1]) = $indexoffset_static($(sym_val[1]),$(sym_idx[1])...)      )]
+      expr_off = [:( $(sym_off[1]) = $indexoffset_static($(sym_val[1]),0,$(sym_idx[1])...)      )]
     else # the next level provides a symbol
       expr_fld = [:( $(sym_fld[1]) = $(levels[2])                                             )]
       expr_idx = [:( $(sym_idx[1]) = $fieldindex_generated($(sym_val[1]),$(sym_fld[1]))       )]
@@ -296,7 +303,7 @@ module MemoryMutate
         push!(expr_idx,:( $(sym_idx[n]) = $(Expr(:tuple,levels[n+1]...))       ))
         push!(expr_bit,:( $(sym_bit[n]) = $refisbitstype_static($(sym_val[n])) ))
         # push!(expr_off,:( $(sym_off[n]) = UInt64(0)                            ))
-        push!(expr_off,:( $(sym_off[n]) = $indexoffset_static($(sym_val[n]),$(sym_idx[n])...) ))
+        push!(expr_off,:( $(sym_off[n]) = $indexoffset_static($(sym_val[n]),$(sym_off[n-1]),$(sym_idx[n])...) ))
       else # the next level provides a symbol
         push!(expr_fld,:( $(sym_fld[n]) = $(levels[n+1]) ))
         push!(expr_idx,:( $(sym_idx[n]) = $fieldindex_generated($(sym_val[n]),$(sym_fld[n])) ))
@@ -401,7 +408,7 @@ module MemoryMutate
   macro ptr(expr)
     return mem_helper(expr,:pointer,true,true,true)
   end
-  macro nullptr(expr)
+  macro voidptr(expr)
     return :(reinterpret(Ptr{Nothing},$(mem_helper(expr,:pointer,true,true,true))))
   end
   macro typedptr(type,expr)

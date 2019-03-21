@@ -1,7 +1,9 @@
 
 # MemoryMutate
 
-_WARNING: This is a proof of conept and it's underlying assumptions need additional validation._
+_WARNING: proof of conept_
+
+_also note the [Setfield.jl](https://github.com/jw3126/Setfield.jl) package_
 
 A macro `@mem` is provided for multi-_level_ assignments `a.b.c.d.e = v` that uses `fieldoffset` to calculate the memory offset of the to-be-assigned field relative to the rightmost mutable _level_ and uses `pointer_from_objref` on that rightmost mutable _level_, adds this offset to the obtained pointer and uses `unsafe_store!` to write the value to that memory location. It compiles down to a few `mov` assembly instructions, if the types and symbols are statically determinable.
 
@@ -199,11 +201,11 @@ end
 
 _More examples might be extracted from [test/mutate.jl](./test/mutate.jl)._
 
-## `@ptr`, `@nullptr`, `@ptrtyped`
+## `@ptr`, `@voidptr`, `@ptrtyped`
 
 These macros determine a memory address just like `@mem` where
 - `@ptr` returns a `Ptr{X}` where `X` is the type of the value at that memory location
-- `@nullptr` just reinterprets `@ptr` to `Ptr{Nothing}`
+- `@voidptr` just reinterprets `@ptr` to `Ptr{Nothing}`
 - `@ptrtyped` of `T` just reinterprets `@ptr` to `Ptr{T}`
 
 ```julia
@@ -249,7 +251,7 @@ f(a,3f0)
 ```
 
 Since `C` is a non-bitstype, this make `B` also a non-bitstype but since `B` is immutable, `pointer_from_objref` won't work.
-To obtain the memory location of `b`, `@yolo` interprets `b` _inside_ of `a` as a pointer to a `B` and uses that.
+To obtain the memory location of `b`, `@yolo` interprets `b` _inside_ of `a` [as a pointer](https://discourse.julialang.org/t/memory-layout-of-structs-with-mutable-fields/21400/13) to a `B` and uses that.
 
 ```julia
 f(a::A, v::Float32) = @yolo a.b.x = v
