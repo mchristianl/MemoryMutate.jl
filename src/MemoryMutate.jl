@@ -5,6 +5,16 @@ module MemoryMutate
   #  undefined symbols weire error
   #  allow C-like syntax a->b->c in @mem and @ptr
   #    allow @mem to have no rhs then
+  # Another reason to support this is, that when a C function is given a pointer (e.g. because it takes it's argument by reference) which resides inside of an allocated bitstype struct …
+  #   put in another way: when we want to pass a C-reference/pointer which refers to a part of an (immutable) bitstype, this has to be a pointer for Julia
+  #   because casting it to a RefValue would require type (tag) information at that memory location, which is not present (i.e. you cannot "cast" a Ptr{T} into a RefValue{T})
+  #     there is unsafe_pointer_to_objref, but this requires (!) the type (tag) information to be present, so (in best case) this will segfault
+  # hand-in-hand might also goes the GC-preserving of such @ptr statements
+  #   so we might want to have something like
+  #     ptr = @ptr base a.b.c.d.e
+  #     @GC.preserve base f(ptr)
+  #   the idea is, that @ptr stores the rightmost "Julia-GC-allocated" Julia-object into `base` that we can use then to preserve in `@GC.preserve`
+  #     currently we need to manually guarantee that the pointers "lifetime" extends for the statement using it
 
   export @mem
   export @yolo
@@ -164,7 +174,7 @@ module MemoryMutate
 
   setfield_or_deref(::Val{:assignment},x::T,f::Symbol,rhs) where T = setfield!(x,f,rhs)
   setfield_or_deref(::Val{:assignment},x::T,::Nothing,rhs) where T = (x[] = rhs)
-  setfield_or_deref(::Val{:pointer},x::T,f::Symbol,rhs) where T = pointer_from_objref(x)+fieldoffset(T,fieldindex_generated(x,f))
+  setfield_or_deref(::Val{:pointer},x::T,f::Symbol,rhs) where T = reinterpret(Ptr{fieldtype(T,f)},pointer_from_objref(x)+fieldoffset(T,fieldindex_generated(x,f))) # TODO: check whether this optimizes statically
   setfield_or_deref(::Val{:pointer},x::Ref{T},::Nothing,rhs) where T = reinterpret(Ptr{T},pointer_from_objref(x))
   fieldtype_static(::T, f::Symbol) where T = fieldtype(T,f)
 
@@ -185,13 +195,21 @@ module MemoryMutate
     sym = gensym()
     dims = E.parameters
     strides = MemoryMutate.cumprod_SimpleVector(dims)
-    elsize = sizeof(T)
+    elsize = T.isbitstype ? sizeof(T) : sizeof(Ptr{Nothing}) # nonbitstypes are stored as "hidden references"/pointers
     index = Expr(:call,:+,[:( (indices[$i]-1)*($s) ) for (i,s) in enumerate(strides)]...)
-    return :( prev + $index * $elsize )
+    return T.isbitstype ? :( prev + $index * $elsize ) : :( $index * $elsize ) # if T is not a bitstype, then the array is not a bitstype and we will receive a pointer to the beginning of the array so the previous index has to be discarded
   end
 
   @generated function fieldpointer_static(basebase,base::T,off::Int64,prev::Ptr{Nothing})::Ptr{Nothing} where T
-    return T.mutable ? :( pointer_from_objref(base)+off ) : T.isbitstype ? :( prev+off ) : :( @GC.preserve basebase unsafe_load(reinterpret(Ptr{Ptr{Nothing}},prev))+off )
+    return (
+        T.mutable
+      ? :( pointer_from_objref(base)+off )
+      : T.isbitstype
+      ? :( prev+off )
+      : T <: SArray
+      ? :( @GC.preserve basebase unsafe_load(unsafe_load(reinterpret(Ptr{Ptr{Ptr{Nothing}}},prev)))+off ) # sizeof(SArray{Tuple{N},SomeNonIsBitsType,1,N}) == 8 ⇒ it seems that SArray of non-isbits types allocates a single, intermediate array (we perform double dereferencing here)
+      : :( @GC.preserve basebase unsafe_load(reinterpret(Ptr{Ptr{Nothing}},prev))+off )
+      )
   end
   @generated function fieldpointer_static(basebase,base::T,off::Int64,::Nothing) where T
     return T.mutable ? :( pointer_from_objref(base)+off ) : :( nothing )
