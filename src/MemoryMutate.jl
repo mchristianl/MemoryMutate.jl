@@ -2,7 +2,9 @@ module MemoryMutate
   using StaticArrays
 
   # TODO:
-  #  undefined symbols weire error
+  #  undefined symbols weird error
+  #    changed `throw` to `error`
+  #    but this issue might be raised by `@assert`
   #  allow C-like syntax a->b->c in @mem and @ptr
   #    allow @mem to have no rhs then
   # Another reason to support this is, that when a C function is given a pointer (e.g. because it takes it's argument by reference) which resides inside of an allocated bitstype struct …
@@ -15,6 +17,43 @@ module MemoryMutate
   #     @GC.preserve base f(ptr)
   #   the idea is, that @ptr stores the rightmost "Julia-GC-allocated" Julia-object into `base` that we can use then to preserve in `@GC.preserve`
   #     currently we need to manually guarantee that the pointers "lifetime" extends for the statement using it
+  # the GMSH API shows how to pass allocated memory to Julia (does it?)
+  #    function getElements(dim = -1, tag = -1)
+  #      api_elementTypes_ = Ref{Ptr{Cint}}()
+  #      api_elementTypes_n_ = Ref{Csize_t}()
+  #      api_elementTags_ = Ref{Ptr{Ptr{Cint}}}()
+  #      …
+  #      ierr = Ref{Cint}()
+  #      ccall((:gmshModelMeshGetElements, gmsh.lib), Nothing,
+  #            (Ptr{Ptr{Cint}}, Ptr{Csize_t}, Ptr{Ptr{Ptr{Cint}}}, Ptr{Ptr{Csize_t}}, Ptr{Csize_t}, Ptr{Ptr{Ptr{Cint}}}, Ptr{Ptr{Csize_t}}, Ptr{Csize_t}, Cint, Cint, Ptr{Cint}),
+  #            api_elementTypes_, api_elementTypes_n_, api_elementTags_, api_elementTags_n_, api_elementTags_nn_, api_nodeTags_, api_nodeTags_n_, api_nodeTags_nn_, dim, tag, ierr)
+  #      …
+  #      elementTypes = unsafe_wrap(Array, api_elementTypes_[], api_elementTypes_n_[], own=true)
+  #      tmp_api_elementTags_ = unsafe_wrap(Array, api_elementTags_[], api_elementTags_nn_[], own=true)
+  #      tmp_api_elementTags_n_ = unsafe_wrap(Array, api_elementTags_n_[], api_elementTags_nn_[], own=true)
+  #      …
+  #      return elementTypes, elementTags, nodeTags
+  #    end
+  # the CImGui.jl (C/C++) wrapper has an @c macro which seems to perform what we do with @ptr
+  #   @c CImGui.ShowDemoWindow(&show_demo_window)
+  #  i.e.
+  #    @macroexpand @c f(&x)
+  #    ##cref#378 = Ref(x)
+  #    ##cref_ret#379 = f(##cref#378)
+  #    x = ##cref#378[]
+  #    ##cref_ret#379
+  #  it is also using
+  #   @cstatic f=Cfloat(0.0) counter=Cint(0) begin … @c CImGui.SliderFloat("float", &f, 0, 1) … end
+  #  i.e.
+  #   @macroexpand @cstatic f=Cfloat(0.0) begin; foo; end
+  #   let global ##static_f#377
+  #       local f = ##static_f#377
+  #      begin
+  #        foo
+  #      end
+  #      ##static_f#377 = f
+  #      f
+  #    end
 
   export @mem
   export @yolo
@@ -28,6 +67,7 @@ module MemoryMutate
   # statically unroll the cases for all fieldnames of T
   @generated function (fieldindex_generated(v::T, f::Symbol)::UInt64) where T
     # inside the generated function macro, parameters and their type are the same, e.g. v == T
+    if T <: Ptr; T = T.parameters[1]; end
     sym_idx = gensym()
     exprs = [:( $sym_idx = UInt64(0) )]
     for (n,fA) in enumerate(fieldnames(T))
@@ -37,13 +77,15 @@ module MemoryMutate
     return Expr(:block,exprs...)
   end # generates a Core.Compiler.Const((:x, :b), false) and @code_warntype is okay with that
 
+  isbitstypeandnotapointer(T::Type) = isbitstype(T) && ~(T <: Ptr)
+
   # statically unroll the cases for all fieldnames of T
   @generated function fieldisbitstype_generated(::T,f::Symbol) where T
     # inside the generated function macro, parameters and their type are the same, e.g. v == T
     sym_bit = gensym()
     exprs = [:( $sym_bit = false )]
     for (n,fA) in enumerate(fieldnames(T))
-      push!(exprs, :( f == $(QuoteNode(fA)) && ($sym_bit = isbitstype($(fieldtypes(T)[n]))) ))
+      push!(exprs, :( f == $(QuoteNode(fA)) && ($sym_bit = isbitstypeandnotapointer($(fieldtypes(T)[n]))) ))
     end
     push!(exprs, :( return $sym_bit ))
     return Expr(:block,exprs...)
@@ -63,42 +105,50 @@ module MemoryMutate
 
   fieldisbitstype_static(::T, f::Symbol) where T = isbitstype(fieldtype(T,f))
   refisbitstype_static(::Ref{T}) where T = isbitstype(T)
+  refisbitstype_static(::NTuple{N,T}) where {N,T} = isbitstype(T)
   refisbitstype_static(::SArray{E,T,N,M}) where {E,T,N,M} = isbitstype(T)
   ismutable_static(::T) where T = T.mutable
-  isreference_static(::T) where T = T <: Ref
+  isreference_static(::T) where T = T <: Ref # note, that we have Ptr <: Ref
   (fieldoffset_static(::T, i::UInt64)::Int64) where T = fieldoffset(T,i)
+  (fieldoffset_static(::Ptr{T}, i::UInt64)::Int64) where T = fieldoffset(T,i)
 
-  @inline @generated function unsafe_store_generated2(::Val{mode},::T,f::S,base::B,off::Int64,rhs::R,ptr::P,::Val{accumulatePointers},::Val{writeReferences},::Val{reallocateImmutableRHSpointer}) where {mode,T,S<:Union{Symbol,Nothing},B,R,P<:Union{Ptr{Nothing},Nothing},accumulatePointers,writeReferences,reallocateImmutableRHSpointer}
+  pointer_or_pointer_from_objref(x::T) where T = pointer_from_objref(x)
+  pointer_or_pointer_from_objref(x::Ptr{T}) where T = x
+
+  @inline @generated function unsafe_store_generated2(::Val{mode},::T,f::S,base::B,off::Int64,rhs::R,ptr::P,::Val{accumulatePointers},::Val{writeReferences},::Val{reallocateImmutableRHSpointer}) where {mode,T,S<:Union{Symbol,Nothing},B,R,P<:Union{Ptr,Nothing},accumulatePointers,writeReferences,reallocateImmutableRHSpointer}
     exprs = []
     sym_tmp = gensym("tmp")
     fnames = []
     ftypes = []
-    if T <: SArray
+    if T <: SArray || T <: NTuple
       fnames = [:nothing]
       ftypes = [T.parameters[2]]
+    elseif T <: Ptr
+      fnames = fieldnames(T.parameters[1])
+      ftypes = fieldtypes(T.parameters[1])
     else
       fnames = fieldnames(T)
       ftypes = fieldtypes(T)
     end
     for (n,(fname,ftype)) in enumerate(zip(fnames,ftypes))
       action = :()
-      if B.mutable # B is mutable, so `pointer_from_objref(base)` is valid
+      if B.mutable || B <: Ptr # B is mutable, so `pointer_from_objref(base)` is valid
         if isbitstype(ftype) # write a bitstype into the memory of `base`
-          mode == :assignment && ( action = :( @GC.preserve base unsafe_store!(reinterpret(Ptr{$(ftype)},pointer_from_objref(base)+off),rhs) ) )
-          mode == :pointer    && ( action = :(                                 reinterpret(Ptr{$(ftype)},pointer_from_objref(base)+off)      ) )
+          mode == :assignment && ( action = :( @GC.preserve base unsafe_store!(reinterpret(Ptr{$(ftype)},pointer_or_pointer_from_objref(base)+off),rhs) ) )
+          mode == :pointer    && ( action = :(                                 reinterpret(Ptr{$(ftype)},pointer_or_pointer_from_objref(base)+off)      ) )
         elseif writeReferences # write a reference into the memory of `base`
           # if the field we want to write to is not a bitstype, then we end up with it's parent as the `base`
           # in that case, we are at the second-to-last level, where the normal assignment can be used
           # so we do not see this case
           mode == :assignment && (
             action = :( @assert isa(rhs,$(ftype)) "The value to assign is of type '$($(R))', but the field to assign it to is of type '$($(ftype))'";
-              @GC.preserve base unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},pointer_from_objref(base)+off),pointer_from_objref(rhs)) ) )
-          mode == :pointer    && ( action = :(reinterpret(Ptr{Ptr{Nothing}},pointer_from_objref(base)+off)                           ) )
+              @GC.preserve base unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},pointer_or_pointer_from_objref(base)+off),pointer_from_objref(rhs)) ) )
+          mode == :pointer    && ( action = :(reinterpret(Ptr{Ptr{Nothing}},pointer_or_pointer_from_objref(base)+off)                           ) )
         else
           # we do not see this case either
-          action = :(throw("""
-            From type '$($T)' the field '$($(QuoteNode(fname)))' is of type '$(ftype)' and it is located in type '$($(B))' at offset $(off).
-            The field type '$(ftype)' is a non-bitstype. You need to set 'writeReferences = true' to enable this operation.
+          action = :(error("""
+            From type '$($T)' the field '$($(QuoteNode(fname)))' is of type '$($ftype)' and it is located in type '$($(B))' at offset $(off).
+            The field type '$($ftype)' is a non-bitstype. You need to set 'writeReferences = true' to enable this operation.
             """))
         end
       elseif accumulatePointers # B is immutable, so we cannot use `pointer_from_objref(base)` and use an accumulated pointer instead
@@ -106,6 +156,7 @@ module MemoryMutate
           if isbitstype(ftype) # write a bitstype into the memory at `ptr`
             mode == :assignment && ( action = :( @GC.preserve base unsafe_store!(reinterpret(Ptr{$(ftype)},ptr),rhs) ) )
             mode == :pointer    && ( action = :(                                 reinterpret(Ptr{$(ftype)},ptr)      ) )
+            println(action)
           elseif writeReferences # write a reference into the memory at `ptr`
             if ftype.mutable # `rhs` is already allocated and `pointer_from_objref(rhs)` is valid
               mode == :assignment && (
@@ -119,33 +170,35 @@ module MemoryMutate
                   @GC.preserve base $sym_tmp unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},ptr),unsafe_load(reinterpret(Ptr{Ptr{Nothing}},pointer_from_objref($sym_tmp)))) ) )
               mode == :pointer && ( action = :(            reinterpret(Ptr{Ptr{Nothing}},ptr)                                                                            ) )
             else
-              action = :(throw("""
+              action = :(error("""
               The given right hand side is of type '$($(R))' which is an immutable non-isbitstype.
               You need to set 'reallocateImmutableRHSpointer = true' to enable this operation.
               """))
             end
           else
-            action = :(throw("""
+            action = :(error("""
             From type '$($T)' the field '$($(QuoteNode(fname)))' is of type '$($(ftype))' and it is located in type '$($(B))' at offset $(off).
             This is a non-bitstype. You need to set 'writeReferences = true' to enable this operation.
             """))
           end
         else
-          action = :(throw("""There is neither a reference, nor a mutable present in the assigment to be used as a base pointer."""))
+          action = :(error("""There is neither a reference, nor a mutable present in the assigment to be used as a base pointer."""))
         end
       else
-        action = :(throw("""
+        action = :(error("""
           From type '$($T)' the field '$($(QuoteNode(fname)))' is of type '$($(ftype))' and it is located in type '$($(B))' at offset $(off).
           The base type '$($(B))' is immutable. You need to set 'accumulatePointers = true' to enable this operation.
           """))
       end
-      if T <: SArray
+      if T <: SArray || T <: NTuple
         push!(exprs,:( $action ))
       else
         push!(exprs,:( f == $(QuoteNode(fname)) && return ($action) ))
       end
     end
+    # push!(exprs,:( error("the field '$($(QuoteNode(fname)))' was not found in type '$($(T))'") ))
     return Expr(:block,exprs...)
+    # return :(println($exprs))
   end
   # fallback for assigning references
   @inline unsafe_store_generated2(::Val{:assignment}, ::Ref,::Nothing,base,basebase,off::Int64,rhs,_,_,_) = (base[] = rhs) # @assert isa(base,Ref), @assert off == 0
@@ -199,23 +252,78 @@ module MemoryMutate
     index = Expr(:call,:+,[:( (indices[$i]-1)*($s) ) for (i,s) in enumerate(strides)]...)
     return T.isbitstype ? :( prev + $index * $elsize ) : :( $index * $elsize ) # if T is not a bitstype, then the array is not a bitstype and we will receive a pointer to the beginning of the array so the previous index has to be discarded
   end
+  @generated function (indexoffset_static(t::NTuple{N,T}, prev::Int64, indices...) :: Int64) where {N,T}
+    elsize = T.isbitstype ? sizeof(T) : sizeof(Ptr{Nothing}) # nonbitstypes are stored as "hidden references"/pointers
+    index = :( indices[1]-1 )
+    return T.isbitstype ? :( prev + $index * $elsize ) : :( $index * $elsize ) # if T is not a bitstype, then the array is not a bitstype and we will receive a pointer to the beginning of the array so the previous index has to be discarded
+  end
 
-  @generated function fieldpointer_static(basebase,base::T,off::Int64,prev::Ptr{Nothing})::Ptr{Nothing} where T
+  @generated function fieldpointer_static(basebase,base::T,off::Int64,prev::Ptr)::Ptr{Nothing} where T
     return (
-        T.mutable
+        T <: Ptr
+      ? :(base+off)
+      : T.mutable
       ? :( pointer_from_objref(base)+off )
       : T.isbitstype
       ? :( prev+off )
-      : T <: SArray
+      : (T <: SArray || T <: MArray) # TODO: MArray? at least throw an error
       ? :( @GC.preserve basebase unsafe_load(unsafe_load(reinterpret(Ptr{Ptr{Ptr{Nothing}}},prev)))+off ) # sizeof(SArray{Tuple{N},SomeNonIsBitsType,1,N}) == 8 ⇒ it seems that SArray of non-isbits types allocates a single, intermediate array (we perform double dereferencing here)
       : :( @GC.preserve basebase unsafe_load(reinterpret(Ptr{Ptr{Nothing}},prev))+off )
       )
   end
   @generated function fieldpointer_static(basebase,base::T,off::Int64,::Nothing) where T
-    return T.mutable ? :( pointer_from_objref(base)+off ) : :( nothing )
+    return T <: Ptr ? :(base+off) : T.mutable ? :( pointer_from_objref(base)+off ) : :( nothing )
   end
 
+
   pointer_from_objref_typed(x :: T) where T = reinterpret(Ptr{T},pointer_from_objref(x))
+
+  # see Tree.agda
+  # leftBalance(:(a.b.c.d->e.f.g.x = v))
+  #   :((((a.b).c).d->((e.f).g).x) = v)
+  function leftBalance(expr)
+    # println()
+    # println(expr)
+    # dump(expr)
+    if expr isa Expr
+      if expr.head == :(->)
+        # a -> b seems to (always?) produce an intermediate :block with a preceeding LineNumberNode that we are filtering out
+        inner = expr.args[2] isa Expr && expr.args[2].head == :block && expr.args[2].args[1] isa LineNumberNode ? expr.args[2].args[2] : expr.args[2]
+        if inner isa Expr
+          if inner.head == :(->)
+            # println("leftBalance (e ⇒ (f ⇒ g))     = leftBalance ((e ⇒ f) ⇒ g)")
+            # a -> b seems to (always?) produce an intermediate :block with a preceeding LineNumberNode that we are filtering out
+            innerinner = inner.args[2] isa Expr && inner.args[2].head == :block && inner.args[2].args[1] isa LineNumberNode ? inner.args[2].args[2] : inner.args[2]
+            return leftBalance(Expr(:(->), Expr(:(->), expr.args[1], inner.args[1]), innerinner))
+          else
+            # println("leftBalance (e ⇒ E H [])      = (e ⇒ E H [])")
+            #   unimplemented / does not occur
+            # println("leftBalance (e ⇒ E H (a ∷ x)) = E H ((e ⇒ a) ∷ (map leftBalance x))")
+            if inner.head == :call
+              #   return Expr(inner.head, inner.args[1], leftBalance(Expr(:(->),expr.args[1],inner.args[2])), map(leftBalance,inner.args[3:end])... )
+              return Expr(inner.head, inner.args[1], (Expr(:(->),expr.args[1],inner.args[2])), map(leftBalance,inner.args[3:end])... )
+            else
+              return Expr(inner.head, leftBalance(Expr(:(->),expr.args[1],inner.args[1])), map(leftBalance,inner.args[2:end])... )
+            end
+          end
+        else
+          # println("leftBalance (e ⇒ S)           = e ⇒ S")
+          return expr
+        end
+      else
+        # println("leftBalance (E H x)           = E H (map leftBalance x)")
+        if expr.head == :call
+          return Expr(expr.head, expr.args[1], map(leftBalance,expr.args[2:end])...)
+        else
+          return Expr(expr.head, map(leftBalance,expr.args)...)
+        end
+      end
+    else
+      # println("leftBalance S                 = S")
+      return expr
+    end
+  end
+
 
   # # because pointer_from_objref is prohibited on immutables, we collect the pointers manually, beginning from the last occuring mutable
   # const accumulatePointers = true
@@ -225,8 +333,14 @@ module MemoryMutate
   # # We use unsafe_load(reinterpret(Ptr{Ptr{Nothing}},Ref(rhs))) to obtain a pointer in that case.
   # const reallocateImmutableRHSpointer = true
 
+  getfieldorpointer(x::T,f::Symbol,idx::UInt64) where {T} = getfield(x,f)
+  getfieldorpointer(x::Ptr{T},f::Symbol,idx::UInt64) where {T} = Ptr{fieldtypes(T)[idx]}(x+fieldoffset(T,idx))
+
   # structinfo(T) = [(fieldoffset(T,i), fieldname(T,i), fieldtype(T,i)) for i = 1:getfieldcount(T)];
-  function mem_helper(expr, mode :: Symbol = :assignment, accumulatePointers :: Bool = false, writeReferences :: Bool = false, reallocateImmutableRHSpointer :: Bool = false)
+  function mem_helper(expr, mode :: Symbol = :assignment, accumulatePointers :: Bool = false, writeReferences :: Bool = false, reallocateImmutableRHSpointer :: Bool = false, followPointers :: Bool = false)
+    if followPointers
+      expr = leftBalance(expr)
+    end
     if mode == :assignment
       @assert expr.head == :(=) "Expression for mutating must be an assignment (=)." # unless we use a->b->c
       RHS = expr.args[2]
@@ -253,6 +367,13 @@ module MemoryMutate
         pushfirst!(cases,:getindex)
         pushfirst!(levels,cur.args[2:end])
         cur = cur.args[1]
+      elseif followPointers && cur isa Expr && cur.head == :(->)
+        pushfirst!(cases,:getfield)
+        # e.g. in a.b->c.d we have, that a and c aren't QuoteNodes anymore, which is okay for a, but noch for c
+        if length(levels) > 0 && cur.args[2] isa Symbol; pushfirst!(levels,QuoteNode(cur.args[2]))
+        else                                           ; pushfirst!(levels,          cur.args[2] )
+        end
+        cur = cur.args[1] # LineNumberNodes are already filtered out by leftBalance
       else
         break
       end
@@ -260,13 +381,14 @@ module MemoryMutate
     pushfirst!(levels,cur)
     pushfirst!(cases,:getfield)
     length(levels) <= 1 && return mode == :pointer ? esc(:($pointer_from_objref_typed($expr))) : esc(expr)
+    # println(collect(zip(levels,cases)))
 
     # for each level, generate symbols to hold
     sym_val = [] # every level produces the parent-value for the next level
     sym_ptr = [] # the cumulated pointer from the first mutable/reference
     # sym_typ = [] # the type of `val`. It turned out, that it's necessary to use generic or generated functions to obtain compiler constants for the type's properties instead of using the type directly. That is why we introduce `fld`, `idx`, `bit`, `ref` and `mut`.
-    sym_ref = [] # a Bool, whether the type of `val` is mutable
-    sym_mut = [] # a Bool, whether the type of `val` is a reference type
+    sym_ref = [] # a Bool, whether the type of `val` is a reference type
+    sym_mut = [] # a Bool, whether the type of `val` is mutable
     sym_fld = [] # this is a symbol (the "value" of the next level's "expression", `level[n+1]`), to be used to produce the `val` of the next level or `nothing` to signal to apply dereferencing `[]`
     sym_idx = [] # if there is a `fld` symbol, then this is it's numerical index fieldnames-table of the type of `val`. `idx` is zero if the symbol does not occur as a field
     sym_bit = [] # if there is a `fld` symbol, then this is a Bool, whether the type of `val`.`fld` is a bitstype
@@ -302,7 +424,7 @@ module MemoryMutate
       expr_fld = [:( $(sym_fld[1]) = $(levels[2])                                             )]
       expr_idx = [:( $(sym_idx[1]) = $fieldindex_generated($(sym_val[1]),$(sym_fld[1]))       )]
       expr_bit = [:( $(sym_bit[1]) = $fieldisbitstype_generated($(sym_val[1]), $(sym_fld[1])) )]
-      expr_off = [:( $(sym_off[1]) = $fieldoffset_static($(sym_val[1]), $(sym_idx[1]))        )]
+      expr_off = [:( $(sym_off[1]) = $fieldoffset_static($(sym_val[1]), $(sym_idx[1]))        )] # TODO: sym_idx becomes 0 when it is not a field of the corresp. struct
     end
     expr_ptr = [:( $(sym_ptr[1]) = $(sym_mut[1]) ? pointer_from_objref($(sym_val[1])) + $(sym_off[1]) : nothing )]
 
@@ -311,7 +433,8 @@ module MemoryMutate
       if cases[n] == :getindex # the current level's value is obtained via dereferencing `[]` the previous level's value
         push!(expr_val,:( $(sym_val[n]) = getindex($(sym_val[n-1]), $(sym_idx[n-1])...) )) # do the dereferencing `[]` to obtain a value
       else # the current level's value is obtained via a symbol from the previous level's value
-        push!(expr_val,:( $(sym_val[n]) = getfield($(sym_val[n-1]), $(sym_fld[n-1])) ))
+        # push!(expr_val,:( $(sym_val[n]) = getfield($(sym_val[n-1]), $(sym_fld[n-1])) ))
+        push!(expr_val,:( $(sym_val[n]) = $getfieldorpointer($(sym_val[n-1]), $(sym_fld[n-1]), $(sym_idx[n-1])) ))
       end
         push!(expr_mut,:( $(sym_mut[n]) = $ismutable_static($(sym_val[n]))     ))
         push!(expr_ref,:( $(sym_ref[n]) = $isreference_static($(sym_val[n-1])) ))
@@ -326,7 +449,7 @@ module MemoryMutate
         push!(expr_fld,:( $(sym_fld[n]) = $(levels[n+1]) ))
         push!(expr_idx,:( $(sym_idx[n]) = $fieldindex_generated($(sym_val[n]),$(sym_fld[n])) ))
         push!(expr_bit,:( $(sym_bit[n]) = $fieldisbitstype_generated($(sym_val[n]), $(sym_fld[n])) ))
-        push!(expr_off,:( $(sym_off[n]) = $fieldoffset_static($(sym_val[n]), $(sym_idx[n])) + ($(sym_bit[n-1]) ? $(sym_off[n-1]) : Int64(0)) ))
+        push!(expr_off,:( $(sym_off[n]) = $fieldoffset_static($(sym_val[n]), $(sym_idx[n])) + ($(sym_bit[n-1]) ? $(sym_off[n-1]) : Int64(0)) )) # TODO: sym_idx becomes 0 when it is not a field of the corresp. struct
       end
       push!(expr_ptr,:( $(sym_ptr[n]) = $fieldpointer_static($(sym_val[n-1]),$(sym_val[n]),$(sym_off[n]),$(sym_ptr[n-1])) ))
     end
@@ -371,7 +494,7 @@ module MemoryMutate
     #   ; $unsafe_store_generated($(sym_val[length(levels)-1]),$(sym_fld[length(levels)-1]),$(sym_val[1]),$(sym_off[length(levels)-1]),$sym_rhs)
     #   )
     expr_str = :(
-        $(LineNumberNode(-1,"@val1+off$(length(levels)-1) <- val$(length(levels)-1)"))
+      $(LineNumberNode(-1,"@val1+off$(length(levels)-1) <- val$(length(levels)-1)"))
       ; $unsafe_store_generated2($(Val(mode)),$(sym_val[length(levels)-1]),$(sym_fld[length(levels)-1]),$(sym_val[1]),$(sym_off[length(levels)-1]),$sym_rhs,$(sym_ptr[1]),$(Val(accumulatePointers)),$(Val(writeReferences)),$(Val(reallocateImmutableRHSpointer)))
       )
     if length(levels) == 2 # if the first level is the second-to-last level AND it is mutable, we can use the normal assignment
@@ -391,7 +514,7 @@ module MemoryMutate
       #   ; $unsafe_store_generated($(sym_val[length(levels)-1]), $(sym_fld[length(levels)-1]), $(sym_val[n]), $(sym_off[length(levels)-1]),$sym_rhs)
       #   )
       expr_str = :(
-            $(LineNumberNode(-1,"@val$(n)+off$(length(levels)-1) <- val$(length(levels)-1)"))
+          $(LineNumberNode(-1,"@val$(n)+off$(length(levels)-1) <- val$(length(levels)-1)"))
           ; $unsafe_store_generated2($(Val(mode)),$(sym_val[length(levels)-1]), $(sym_fld[length(levels)-1]), $(sym_val[n]), $(sym_off[length(levels)-1]),$sym_rhs,$(sym_ptr[n]),$(Val(accumulatePointers)),$(Val(writeReferences)),$(Val(reallocateImmutableRHSpointer)))
         )
       if n == length(levels)-1 # if the current level is the second-to-last level AND it is mutable, we can use the normal assignment
@@ -418,18 +541,18 @@ module MemoryMutate
   end
 
   macro mem(expr)
-    return mem_helper(expr,:assignment,false,false,false)
+    return mem_helper(expr,:assignment,false,false,false,true)
   end
   macro yolo(expr)
-    return mem_helper(expr,:assignment,true,true,true)
+    return mem_helper(expr,:assignment,true,true,true,true)
   end
   macro ptr(expr)
-    return mem_helper(expr,:pointer,true,true,true)
+    return mem_helper(expr,:pointer,true,true,true,true)
   end
   macro voidptr(expr)
-    return :(reinterpret(Ptr{Nothing},$(mem_helper(expr,:pointer,true,true,true))))
+    return :(reinterpret(Ptr{Nothing},$(mem_helper(expr,:pointer,true,true,true,true))))
   end
   macro typedptr(type,expr)
-    return :(reinterpret(Ptr{$type},$(mem_helper(expr,:pointer,true,true,true))))
+    return :(reinterpret(Ptr{$type},$(mem_helper(expr,:pointer,true,true,true,true))))
   end
 end

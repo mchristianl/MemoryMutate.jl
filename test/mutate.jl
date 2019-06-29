@@ -608,3 +608,4 @@ code_native(io,test602b,(A6b,Int64,Int64,Int64,Float32)); display_asm_stat_io(io
 
 
 # TODO: a test of a non-isbitstype SArray; since it allocates an intermediate array and needs double dereferencing
+#   same for MArray
