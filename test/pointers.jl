@@ -86,3 +86,69 @@ code_native(io,test211,(A2,Float32)); display_asm_stat_io(io) # (total = 2, movs
 code_native(io,test212,(A2,B2));      display_asm_stat_io(io) # (total = 8, movs = 5, mov = 1, vmov = 4)
 code_native(io,test213,(A2,Float32)); display_asm_stat_io(io) # (total = 2, movs = 1, mov = 0, vmov = 1)
 code_native(io,test214,(A2,A2));      display_asm_stat_io(io) # (total = 3, movs = 2, mov = 2, vmov = 0)
+
+################################################################################
+
+struct G3; x :: Float32;               end
+struct F3; x :: Float32; g ::     G3 ; end
+struct E3; x :: Float32; f ::     F3 ; end
+struct D3; x :: Float32; e :: Ptr{E3}; end
+struct C3; x :: Float32; d ::     D3 ; end
+struct B3; x :: Float32; c ::     C3 ; end
+struct A3; x :: Float32; b ::     B3 ; end
+
+g3    =     G3(6.0f0)     # NOTE: we cannot change g2 and f2, since they aren't allocated on the heap
+f3    =     F3(5.0f0,g3)  #
+e3    = Ref(E3(4.0f0,f3)) # here, we copy f2 (and it's inner g2) to the heap -> these ones, e2[].f, e2[].f.g and e2[].f.g.x, can be changed
+e3ptr = Ptr{E3}(pointer_from_objref(e3))
+d3    =     D3(3.0f0,e3ptr)
+c3    =     C3(2.0f0,d3)
+b3    =     B3(1.0f0,c3)
+a3    = Ref(A3(0.0f0,b3))
+a3ptr = Ptr{A3}(pointer_from_objref(a3))
+
+test301(a::Ptr{A3},v::Float32) = @mem  a->b.c.d.e->f.g.x = v
+test302(a::Ptr{A3},v::G3)      = @mem  a->b.c.d.e->f.g = v
+test303(a::Ptr{A3},v::Float32) = @mem  a->b.c.d.e->f.x = v
+test304(a::Ptr{A3},v::F3)      = @mem  a->b.c.d.e->f = v
+test305(a::Ptr{A3},v::Float32) = @mem  a->b.c.d.e->x = v
+test306(a::Ptr{A3},v::Ptr{E3}) = @mem  a->b.c.d.e = v
+test307(a::Ptr{A3},v::Float32) = @mem  a->b.c.d.x = v
+test308(a::Ptr{A3},v::D3)      = @mem  a->b.c.d = v
+test309(a::Ptr{A3},v::Float32) = @mem  a->b.c.x = v
+test310(a::Ptr{A3},v::C3)      = @mem  a->b.c = v
+test311(a::Ptr{A3},v::Float32) = @mem  a->b.x = v
+test312(a::Ptr{A3},v::B3)      = @mem  a->b = v
+test313(a::Ptr{A3},v::Float32) = @mem  a->x = v
+test314(a::Ptr{A3},v::A3)      = @mem  a[] = v
+
+v  = 0f0
+v += 1f0;                                @assert unsafe_load(unsafe_load(a3ptr).b.c.d.e).f.g.x  != v;           test301(a3ptr,v);           @assert unsafe_load(unsafe_load(a3ptr).b.c.d.e).f.g.x  == v;
+v += 1f0;                                @assert unsafe_load(unsafe_load(a3ptr).b.c.d.e).f.g    != G3(v);       test302(a3ptr,G3(v));       @assert unsafe_load(unsafe_load(a3ptr).b.c.d.e).f.g    == G3(v);
+v += 1f0;                                @assert unsafe_load(unsafe_load(a3ptr).b.c.d.e).f.x    != v;           test303(a3ptr,v);           @assert unsafe_load(unsafe_load(a3ptr).b.c.d.e).f.x    == v;
+v += 1f0;                                @assert unsafe_load(unsafe_load(a3ptr).b.c.d.e).f      != F3(v,g3);    test304(a3ptr,F3(v,g3));    @assert unsafe_load(unsafe_load(a3ptr).b.c.d.e).f      == F3(v,g3);
+v += 1f0;                                @assert unsafe_load(unsafe_load(a3ptr).b.c.d.e).x      != v;           test305(a3ptr,v);           @assert unsafe_load(unsafe_load(a3ptr).b.c.d.e).x      == v;
+v += 1f0; e3b, e3bptr = mkptr(E3(v,f3)); @assert             unsafe_load(a3ptr).b.c.d.e         != e3bptr;      test306(a3ptr,e3bptr);      @assert             unsafe_load(a3ptr).b.c.d.e         == e3bptr;
+v += 1f0;                                @assert             unsafe_load(a3ptr).b.c.d.x         != v;           test307(a3ptr,v);           @assert             unsafe_load(a3ptr).b.c.d.x         == v;
+v += 1f0;                                @assert             unsafe_load(a3ptr).b.c.d           != D3(v,e3ptr); test308(a3ptr,D3(v,e3ptr)); @assert             unsafe_load(a3ptr).b.c.d           == D3(v,e3ptr);
+v += 1f0;                                @assert             unsafe_load(a3ptr).b.c.x           != v;           test309(a3ptr,v);           @assert             unsafe_load(a3ptr).b.c.x           == v;
+v += 1f0;                                @assert             unsafe_load(a3ptr).b.c             != C3(v,d3);    test310(a3ptr,C3(v,d3));    @assert             unsafe_load(a3ptr).b.c             == C3(v,d3);
+v += 1f0;                                @assert             unsafe_load(a3ptr).b.x             != v;           test311(a3ptr,v);           @assert             unsafe_load(a3ptr).b.x             == v;
+v += 1f0;                                @assert             unsafe_load(a3ptr).b               != B3(v,c3);    test312(a3ptr,B3(v,c3));    @assert             unsafe_load(a3ptr).b               == B3(v,c3);
+v += 1f0;                                @assert             unsafe_load(a3ptr).x               != v;           test313(a3ptr,v);           @assert             unsafe_load(a3ptr).x               == v;
+v += 1f0; a3b, a3bptr = mkptr(A3(v,b3)); @assert             unsafe_load(a3ptr)                 != A3(v,b3);    test314(a3ptr,A3(v,b3));    @assert             unsafe_load(a3ptr)                 == A3(v,b3);
+
+code_native(io,test301,(Ptr{A3},Float32)); display_asm_stat_io(io) # (total = 3, movs = 2, mov = 1, vmov = 1)
+code_native(io,test302,(Ptr{A3},G3));      display_asm_stat_io(io) # (total = 6, movs = 4, mov = 3, vmov = 1)
+code_native(io,test303,(Ptr{A3},Float32)); display_asm_stat_io(io) # (total = 3, movs = 2, mov = 1, vmov = 1)
+code_native(io,test304,(Ptr{A3},F3));      display_asm_stat_io(io) # (total = 6, movs = 5, mov = 3, vmov = 2)
+code_native(io,test305,(Ptr{A3},Float32)); display_asm_stat_io(io) # (total = 4, movs = 2, mov = 1, vmov = 1)
+code_native(io,test306,(Ptr{A3},Ptr{E3})); display_asm_stat_io(io) # (total = 4, movs = 2, mov = 2, vmov = 0)
+code_native(io,test307,(Ptr{A3},Float32)); display_asm_stat_io(io) # (total = 2, movs = 1, mov = 0, vmov = 1)
+code_native(io,test308,(Ptr{A3},D3));      display_asm_stat_io(io) # (total = 6, movs = 5, mov = 1, vmov = 4)
+code_native(io,test309,(Ptr{A3},Float32)); display_asm_stat_io(io) # (total = 2, movs = 1, mov = 0, vmov = 1)
+code_native(io,test310,(Ptr{A3},C3));      display_asm_stat_io(io) # (total = 10, movs = 9, mov = 5, vmov = 4)
+code_native(io,test311,(Ptr{A3},Float32)); display_asm_stat_io(io) # (total = 2, movs = 1, mov = 0, vmov = 1)
+code_native(io,test312,(Ptr{A3},B3));      display_asm_stat_io(io) # (total = 8, movs = 5, mov = 1, vmov = 4)
+code_native(io,test313,(Ptr{A3},Float32)); display_asm_stat_io(io) # (total = 2, movs = 1, mov = 0, vmov = 1)
+code_native(io,test314,(Ptr{A3},A3));      display_asm_stat_io(io) # (total = 7, movs = 5, mov = 3, vmov = 2)

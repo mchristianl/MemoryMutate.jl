@@ -142,69 +142,74 @@ module MemoryMutate
       fnames = fieldnames(T)
       ftypes = fieldtypes(T)
     end
-    for (n,(fname,ftype)) in enumerate(zip(fnames,ftypes))
-      action = :()
-      if B.mutable || B <: Ptr # B is mutable, so `pointer_from_objref(base)` is valid
-        if isbitstype(ftype) # write a bitstype into the memory of `base`
-          mode == :assignment && ( action = :( @GC.preserve base unsafe_store!(reinterpret(Ptr{$(ftype)},pointer_or_pointer_from_objref(base)+off),rhs) ) )
-          mode == :pointer    && ( action = :(                                 reinterpret(Ptr{$(ftype)},pointer_or_pointer_from_objref(base)+off)      ) )
-        elseif writeReferences # write a reference into the memory of `base`
-          # if the field we want to write to is not a bitstype, then we end up with it's parent as the `base`
-          # in that case, we are at the second-to-last level, where the normal assignment can be used
-          # so we do not see this case
-          mode == :assignment && (
-            action = :( @assert isa(rhs,$(ftype)) "The value to assign is of type '$($(R))', but the field to assign it to is of type '$($(ftype))'";
-              @GC.preserve base unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},pointer_or_pointer_from_objref(base)+off),pointer_from_objref(rhs)) ) )
-          mode == :pointer    && ( action = :(reinterpret(Ptr{Ptr{Nothing}},pointer_or_pointer_from_objref(base)+off)                           ) )
-        else
-          # we do not see this case either
-          action = :(error("""
-            From type '$($T)' the field '$($(QuoteNode(fname)))' is of type '$($ftype)' and it is located in type '$($(B))' at offset $(off).
-            The field type '$($ftype)' is a non-bitstype. You need to set 'writeReferences = true' to enable this operation.
-            """))
-        end
-      elseif accumulatePointers # B is immutable, so we cannot use `pointer_from_objref(base)` and use an accumulated pointer instead
-        if P != Nothing # if we have such pointer, we can use it
-          if isbitstype(ftype) # write a bitstype into the memory at `ptr`
-            mode == :assignment && ( action = :( @GC.preserve base unsafe_store!(reinterpret(Ptr{$(ftype)},ptr),rhs) ) )
-            mode == :pointer    && ( action = :(                                 reinterpret(Ptr{$(ftype)},ptr)      ) )
-          elseif writeReferences # write a reference into the memory at `ptr`
-            if ftype.mutable # `rhs` is already allocated and `pointer_from_objref(rhs)` is valid
-              mode == :assignment && (
-                action = :( @assert isa(rhs,$(ftype)) "The value to assign is of type '$($(R))', but the field to assign it to is of type '$($(ftype))'";
-                  @GC.preserve base unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},ptr),pointer_from_objref(rhs)) ) )
-              mode == :pointer    && ( action = :(reinterpret(Ptr{Ptr{Nothing}},ptr) ) )
-            elseif reallocateImmutableRHSpointer # we need to allocate `rhs` with `Ref`
-              mode == :assignment && (
-                action = :( @assert isa(rhs,$(ftype)) "The value to assign is of type '$($(R))', but the field to assign it to is of type '$($(ftype))'";
-                  $sym_tmp = Ref(rhs);
-                  @GC.preserve base $sym_tmp unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},ptr),unsafe_load(reinterpret(Ptr{Ptr{Nothing}},pointer_from_objref($sym_tmp)))) ) )
-              mode == :pointer && ( action = :(            reinterpret(Ptr{Ptr{Nothing}},ptr)                                                                            ) )
+    if B <: Ptr && S <: Nothing # write directly to the pointer
+      mode == :assignment && push!(exprs, :( @GC.preserve base unsafe_store!(base,rhs) ) )
+      mode == :pointer    && push!(exprs, :(                                 base      ) )
+    else # write to the designated place
+      for (n,(fname,ftype)) in enumerate(zip(fnames,ftypes))
+        action = :()
+        if B.mutable || B <: Ptr # B is mutable, so `pointer_from_objref(base)` is valid
+          if isbitstype(ftype) # write a bitstype into the memory of `base`
+            mode == :assignment && ( action = :( @GC.preserve base unsafe_store!(reinterpret(Ptr{$(ftype)},pointer_or_pointer_from_objref(base)+off),rhs) ) )
+            mode == :pointer    && ( action = :(                                 reinterpret(Ptr{$(ftype)},pointer_or_pointer_from_objref(base)+off)      ) )
+          elseif writeReferences # write a reference into the memory of `base`
+            # if the field we want to write to is not a bitstype, then we end up with it's parent as the `base`
+            # in that case, we are at the second-to-last level, where the normal assignment can be used
+            # so we do not see this case
+            mode == :assignment && (
+              action = :( @assert isa(rhs,$(ftype)) "The value to assign is of type '$($(R))', but the field to assign it to is of type '$($(ftype))'";
+                @GC.preserve base unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},pointer_or_pointer_from_objref(base)+off),pointer_from_objref(rhs)) ) )
+            mode == :pointer    && ( action = :(reinterpret(Ptr{Ptr{Nothing}},pointer_or_pointer_from_objref(base)+off)                           ) )
+          else
+            # we do not see this case either
+            action = :(error("""
+              From type '$($T)' the field '$($(QuoteNode(fname)))' is of type '$($ftype)' and it is located in type '$($(B))' at offset $(off).
+              The field type '$($ftype)' is a non-bitstype. You need to set 'writeReferences = true' to enable this operation.
+              """))
+          end
+        elseif accumulatePointers # B is immutable, so we cannot use `pointer_from_objref(base)` and use an accumulated pointer instead
+          if P != Nothing # if we have such pointer, we can use it
+            if isbitstype(ftype) # write a bitstype into the memory at `ptr`
+              mode == :assignment && ( action = :( @GC.preserve base unsafe_store!(reinterpret(Ptr{$(ftype)},ptr),rhs) ) )
+              mode == :pointer    && ( action = :(                                 reinterpret(Ptr{$(ftype)},ptr)      ) )
+            elseif writeReferences # write a reference into the memory at `ptr`
+              if ftype.mutable # `rhs` is already allocated and `pointer_from_objref(rhs)` is valid
+                mode == :assignment && (
+                  action = :( @assert isa(rhs,$(ftype)) "The value to assign is of type '$($(R))', but the field to assign it to is of type '$($(ftype))'";
+                    @GC.preserve base unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},ptr),pointer_from_objref(rhs)) ) )
+                mode == :pointer    && ( action = :(reinterpret(Ptr{Ptr{Nothing}},ptr) ) )
+              elseif reallocateImmutableRHSpointer # we need to allocate `rhs` with `Ref`
+                mode == :assignment && (
+                  action = :( @assert isa(rhs,$(ftype)) "The value to assign is of type '$($(R))', but the field to assign it to is of type '$($(ftype))'";
+                    $sym_tmp = Ref(rhs);
+                    @GC.preserve base $sym_tmp unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},ptr),unsafe_load(reinterpret(Ptr{Ptr{Nothing}},pointer_from_objref($sym_tmp)))) ) )
+                mode == :pointer && ( action = :(            reinterpret(Ptr{Ptr{Nothing}},ptr)                                                                            ) )
+              else
+                action = :(error("""
+                The given right hand side is of type '$($(R))' which is an immutable non-isbitstype.
+                You need to set 'reallocateImmutableRHSpointer = true' to enable this operation.
+                """))
+              end
             else
               action = :(error("""
-              The given right hand side is of type '$($(R))' which is an immutable non-isbitstype.
-              You need to set 'reallocateImmutableRHSpointer = true' to enable this operation.
+              From type '$($T)' the field '$($(QuoteNode(fname)))' is of type '$($(ftype))' and it is located in type '$($(B))' at offset $(off).
+              This is a non-bitstype. You need to set 'writeReferences = true' to enable this operation.
               """))
             end
           else
-            action = :(error("""
-            From type '$($T)' the field '$($(QuoteNode(fname)))' is of type '$($(ftype))' and it is located in type '$($(B))' at offset $(off).
-            This is a non-bitstype. You need to set 'writeReferences = true' to enable this operation.
-            """))
+            action = :(error("""There is neither a reference, nor a mutable present in the assigment to be used as a base pointer."""))
           end
         else
-          action = :(error("""There is neither a reference, nor a mutable present in the assigment to be used as a base pointer."""))
+          action = :(error("""
+            From type '$($T)' the field '$($(QuoteNode(fname)))' is of type '$($(ftype))' and it is located in type '$($(B))' at offset $(off).
+            The base type '$($(B))' is immutable. You need to set 'accumulatePointers = true' to enable this operation.
+            """))
         end
-      else
-        action = :(error("""
-          From type '$($T)' the field '$($(QuoteNode(fname)))' is of type '$($(ftype))' and it is located in type '$($(B))' at offset $(off).
-          The base type '$($(B))' is immutable. You need to set 'accumulatePointers = true' to enable this operation.
-          """))
-      end
-      if T <: SArray || T <: NTuple
-        push!(exprs,:( $action ))
-      else
-        push!(exprs,:( f == $(QuoteNode(fname)) && return ($action) ))
+        if T <: SArray || T <: NTuple
+          push!(exprs,:( $action )) # NOTE: this is set up to be just executed once
+        else
+          push!(exprs,:( f == $(QuoteNode(fname)) && return ($action) ))
+        end
       end
     end
     # push!(exprs,:( error("the field '$($(QuoteNode(fname)))' was not found in type '$($(T))'") ))
@@ -214,6 +219,98 @@ module MemoryMutate
   # fallback for assigning references
   @inline unsafe_store_generated2(::Val{:assignment}, ::Ref,::Nothing,base,basebase,off::Int64,rhs,_,_,_) = (base[] = rhs) # @assert isa(base,Ref), @assert off == 0
   @inline unsafe_store_generated2(::Val{:pointer}, ::Ref{T},::Nothing,base,basebase,off::Int64,rhs,_,_,_) where T = reinterpret(Ptr{T},pointer_from_objref(base)) # @assert isa(base,Ref), @assert off == 0
+
+
+
+  function unsafe_store_generated3(::Val{mode},::T,f::S,base::B,off::Int64,rhs::R,ptr::P,::Val{accumulatePointers},::Val{writeReferences},::Val{reallocateImmutableRHSpointer}) where {mode,T,S<:Union{Symbol,Nothing},B,R,P<:Union{Ptr,Nothing},accumulatePointers,writeReferences,reallocateImmutableRHSpointer}
+    exprs = []
+    sym_tmp = gensym("tmp")
+    fnames = []
+    ftypes = []
+    if T <: SArray || T <: NTuple
+      fnames = [:nothing]
+      ftypes = [T.parameters[2]]
+    elseif T <: Ptr
+      fnames = fieldnames(T.parameters[1])
+      ftypes = fieldtypes(T.parameters[1])
+    else
+      fnames = fieldnames(T)
+      ftypes = fieldtypes(T)
+    end
+    if B <: Ptr && S <: Nothing # write directly to the pointer
+      mode == :assignment && push!(exprs, :( @GC.preserve base unsafe_store!(base,rhs) ) )
+      mode == :pointer    && push!(exprs, :(                                 base      ) )
+    else # write to the designated place
+      for (n,(fname,ftype)) in enumerate(zip(fnames,ftypes))
+        action = :()
+        if B.mutable || B <: Ptr # B is mutable, so `pointer_from_objref(base)` is valid
+          if isbitstype(ftype) # write a bitstype into the memory of `base`
+            mode == :assignment && ( action = :( @GC.preserve base unsafe_store!(reinterpret(Ptr{$(ftype)},pointer_or_pointer_from_objref(base)+off),rhs) ) )
+            mode == :pointer    && ( action = :(                                 reinterpret(Ptr{$(ftype)},pointer_or_pointer_from_objref(base)+off)      ) )
+          elseif writeReferences # write a reference into the memory of `base`
+            # if the field we want to write to is not a bitstype, then we end up with it's parent as the `base`
+            # in that case, we are at the second-to-last level, where the normal assignment can be used
+            # so we do not see this case
+            mode == :assignment && (
+              action = :( @assert isa(rhs,$(ftype)) "The value to assign is of type '$($(R))', but the field to assign it to is of type '$($(ftype))'";
+                @GC.preserve base unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},pointer_or_pointer_from_objref(base)+off),pointer_from_objref(rhs)) ) )
+            mode == :pointer    && ( action = :(reinterpret(Ptr{Ptr{Nothing}},pointer_or_pointer_from_objref(base)+off)                           ) )
+          else
+            # we do not see this case either
+            action = :(error("""
+              From type '$($T)' the field '$($(QuoteNode(fname)))' is of type '$($ftype)' and it is located in type '$($(B))' at offset $(off).
+              The field type '$($ftype)' is a non-bitstype. You need to set 'writeReferences = true' to enable this operation.
+              """))
+          end
+        elseif accumulatePointers # B is immutable, so we cannot use `pointer_from_objref(base)` and use an accumulated pointer instead
+          if P != Nothing # if we have such pointer, we can use it
+            if isbitstype(ftype) # write a bitstype into the memory at `ptr`
+              mode == :assignment && ( action = :( @GC.preserve base unsafe_store!(reinterpret(Ptr{$(ftype)},ptr),rhs) ) )
+              mode == :pointer    && ( action = :(                                 reinterpret(Ptr{$(ftype)},ptr)      ) )
+            elseif writeReferences # write a reference into the memory at `ptr`
+              if ftype.mutable # `rhs` is already allocated and `pointer_from_objref(rhs)` is valid
+                mode == :assignment && (
+                  action = :( @assert isa(rhs,$(ftype)) "The value to assign is of type '$($(R))', but the field to assign it to is of type '$($(ftype))'";
+                    @GC.preserve base unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},ptr),pointer_from_objref(rhs)) ) )
+                mode == :pointer    && ( action = :(reinterpret(Ptr{Ptr{Nothing}},ptr) ) )
+              elseif reallocateImmutableRHSpointer # we need to allocate `rhs` with `Ref`
+                mode == :assignment && (
+                  action = :( @assert isa(rhs,$(ftype)) "The value to assign is of type '$($(R))', but the field to assign it to is of type '$($(ftype))'";
+                    $sym_tmp = Ref(rhs);
+                    @GC.preserve base $sym_tmp unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},ptr),unsafe_load(reinterpret(Ptr{Ptr{Nothing}},pointer_from_objref($sym_tmp)))) ) )
+                mode == :pointer && ( action = :(            reinterpret(Ptr{Ptr{Nothing}},ptr)                                                                            ) )
+              else
+                action = :(error("""
+                The given right hand side is of type '$($(R))' which is an immutable non-isbitstype.
+                You need to set 'reallocateImmutableRHSpointer = true' to enable this operation.
+                """))
+              end
+            else
+              action = :(error("""
+              From type '$($T)' the field '$($(QuoteNode(fname)))' is of type '$($(ftype))' and it is located in type '$($(B))' at offset $(off).
+              This is a non-bitstype. You need to set 'writeReferences = true' to enable this operation.
+              """))
+            end
+          else
+            action = :(error("""There is neither a reference, nor a mutable present in the assigment to be used as a base pointer."""))
+          end
+        else
+          action = :(error("""
+            From type '$($T)' the field '$($(QuoteNode(fname)))' is of type '$($(ftype))' and it is located in type '$($(B))' at offset $(off).
+            The base type '$($(B))' is immutable. You need to set 'accumulatePointers = true' to enable this operation.
+            """))
+        end
+        if T <: SArray || T <: NTuple
+          push!(exprs,:( $action )) # NOTE: this is set up to be just executed once
+        else
+          push!(exprs,:( f == $(QuoteNode(fname)) && return ($action) ))
+        end
+      end
+    end
+    # push!(exprs,:( error("the field '$($(QuoteNode(fname)))' was not found in type '$($(T))'") ))
+    return Expr(:block,exprs...)
+    # return :(println($exprs))
+  end
 
   # unroll the cases for all fieldnames of T
   @generated function unsafe_store_generated(::T,f::Symbol,base,off::Int64,rhs) where T
@@ -311,12 +408,25 @@ module MemoryMutate
           else
             # println("leftBalance (e ⇒ E H [])      = (e ⇒ E H [])")
             #   unimplemented / does not occur
-            # println("leftBalance (e ⇒ E H (a ∷ x)) = E H ((e ⇒ a) ∷ (map leftBalance x))")
+            # println("leftBalance (e ⇒ E H (a ∷ x)) = E H (leftBalance (leftBalance e ⇒ a) ∷ (map leftBalance x))")
             if inner.head == :call
               #   return Expr(inner.head, inner.args[1], leftBalance(Expr(:(->),expr.args[1],inner.args[2])), map(leftBalance,inner.args[3:end])... )
-              return Expr(inner.head, inner.args[1], (Expr(:(->),expr.args[1],inner.args[2])), map(leftBalance,inner.args[3:end])... )
+              # println("inner.head        = $(inner.head)")
+              # println("inner.args[1]     = $(inner.args[1])")
+              # println("expr.args[1]      = $(expr.args[1])")
+              # println("inner.args[2]     = $(inner.args[2])")
+              # println("inner.args[3:end] = $(inner.args[3:end])")
+              # println()
+              return Expr(inner.head, inner.args[1],            (Expr(:(->),leftBalance(expr.args[1]),inner.args[2])), map(leftBalance,inner.args[3:end])... )
+            # elseif inner.head == :(.)
+            #   return Expr(inner.head, inner.args[1], leftBalance(Expr(:(->),expr.args[1],inner.args[2])), map(leftBalance,inner.args[3:end])... )
             else
-              return Expr(inner.head, leftBalance(Expr(:(->),expr.args[1],inner.args[1])), map(leftBalance,inner.args[2:end])... )
+              # println("inner.head        = $(inner.head)")
+              # println("expr.args[1]      = $(expr.args[1])")
+              # println("inner.args[1]     = $(inner.args[1])")
+              # println("inner.args[3:end] = $(inner.args[2:end])")
+              # println()
+              return Expr(inner.head,                leftBalance(Expr(:(->),leftBalance(expr.args[1]),inner.args[1])), map(leftBalance,inner.args[2:end])... )
             end
           end
         else
@@ -346,13 +456,17 @@ module MemoryMutate
   # # We use unsafe_load(reinterpret(Ptr{Ptr{Nothing}},Ref(rhs))) to obtain a pointer in that case.
   # const reallocateImmutableRHSpointer = true
 
+  derefPtrPtr(x::T) where T = x
+  derefPtrPtr(x::Ptr{Ptr{T}}) where T = unsafe_load(x)
+  PtrOrNothing(x::T) where T = nothing
+  PtrOrNothing(x::Ptr{T}) where T = Ptr{Nothing}(x)
+
   @inline getfieldorpointer(x::T,f::Symbol,idx::UInt64) where {T} = getfield(x,f)
-  # @inline getfieldorpointer(x::Ptr{T},f::Symbol,idx::UInt64) where {T} = Ptr{fieldtypes(T)[idx]}(x+fieldoffset(T,idx))
   @generated function getfieldorpointer(x::Ptr{T},f::Symbol,idx::UInt64) where {T}
     sym_res = gensym()
     exprs = [:( $sym_res = false )]
     for (n,fA) in enumerate(fieldnames(T))
-      push!(exprs, :( f == $(QuoteNode(fA)) && ($sym_res = Ptr{$(fieldtypes(T)[n])}(x+$(fieldoffset(T,n)))  ) ))
+      push!(exprs, :( f == $(QuoteNode(fA)) && ($sym_res = $derefPtrPtr(Ptr{$(fieldtypes(T)[n])}(x+$(fieldoffset(T,n))))  ) ))
     end
     push!(exprs, :( return $sym_res ))
     return Expr(:block,exprs...)
@@ -449,7 +563,7 @@ module MemoryMutate
       expr_bit = [:( $(sym_bit[1]) = $fieldisbitstype_generated($(sym_val[1]), $(sym_fld[1])) )]
       expr_off = [:( $(sym_off[1]) = $fieldoffset_static($(sym_val[1]), $(sym_idx[1]))        )] # TODO: sym_idx becomes 0 when it is not a field of the corresp. struct
     end
-    expr_ptr = [:( $(sym_ptr[1]) = $(sym_mut[1]) ? pointer_from_objref($(sym_val[1])) + $(sym_off[1]) : nothing )]
+    expr_ptr = [:( $(sym_ptr[1]) = $(sym_mut[1]) ? pointer_from_objref($(sym_val[1])) + $(sym_off[1]) : $PtrOrNothing($(sym_val[1])) )]
 
     # setting up the expressions to hold compiler constants: for the following levels
     for n=2:length(levels)-1 # every level, we "get" a value: either by dereferencing or by accessing a field
