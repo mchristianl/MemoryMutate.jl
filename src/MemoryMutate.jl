@@ -5,8 +5,7 @@ module MemoryMutate
   #  undefined symbols weird error
   #    changed `throw` to `error`
   #    but this issue might be raised by `@assert`
-  #  allow C-like syntax a->b->c in @mem and @ptr
-  #    allow @mem to have no rhs then
+  #      it occurs instead of an `undefined variable` error, which is hidden there
   # we could, for non-bitstypes, allow `@mem a = x` to implement `unsafe_store!(Ptr{A}(pointer_from_objref(a)), x)`
   # Another reason to support this is, that when a C function is given a pointer (e.g. because it takes it's argument by reference) which resides inside of an allocated bitstype struct …
   #   put in another way: when we want to pass a C-reference/pointer which refers to a part of an (immutable) bitstype, this has to be a pointer for Julia
@@ -273,6 +272,7 @@ module MemoryMutate
     index = :( indices[1]-1 )
     return T.isbitstype ? :( prev + $index * $elsize ) : :( $index * $elsize ) # if T is not a bitstype, then the array is not a bitstype and we will receive a pointer to the beginning of the array so the previous index has to be discarded
   end
+  indexoffset_static(t::Ptr{T}, prev::Int64) where T = Int64(0)
   @generated function (indexoffset_static(t::Ptr{T}, prev::Int64, indices...) :: Int64) where {T}
     # @assert prev == 0
     elsize = T.isbitstype ? sizeof(T) : sizeof(Ptr{Nothing}) # nonbitstypes are stored as "hidden references"/pointers
@@ -318,7 +318,7 @@ module MemoryMutate
             # println("leftBalance (e ⇒ (f ⇒ g))     = leftBalance ((e ⇒ f) ⇒ g)")
             # a -> b seems to (always?) produce an intermediate :block with a preceeding LineNumberNode that we are filtering out
             innerinner = inner.args[2] isa Expr && inner.args[2].head == :block && inner.args[2].args[1] isa LineNumberNode ? inner.args[2].args[2] : inner.args[2]
-            return leftBalance(Expr(:(->), Expr(:(->), expr.args[1], inner.args[1]), innerinner))
+            return leftBalance(Expr(:(->), leftBalance(Expr(:(->), expr.args[1], inner.args[1])), innerinner))
           else
             # println("leftBalance (e ⇒ E H [])      = (e ⇒ E H [])")
             #   unimplemented / does not occur
@@ -345,7 +345,9 @@ module MemoryMutate
           end
         else
           # println("leftBalance (e ⇒ S)           = e ⇒ S")
-          return expr
+          # filter out LineNumberNodes
+          inner = expr.args[2] isa Expr && expr.args[2].head == :block && expr.args[2].args[1] isa LineNumberNode ? expr.args[2].args[2] : expr.args[2]
+          return Expr(expr.head,expr.args[1],inner)
         end
       else
         # println("leftBalance (E H x)           = E H (map leftBalance x)")
@@ -391,6 +393,15 @@ module MemoryMutate
     if followPointers
       expr = leftBalance(expr)
     end
+    if mode == :assignment && expr.head != :(=)
+      action = mem_helper1(expr, :pointer, accumulatePointers, writeReferences, reallocateImmutableRHSpointer, followPointers)
+      return :( unsafe_load($action) )
+    else
+      action = mem_helper1(expr, mode, accumulatePointers, writeReferences, reallocateImmutableRHSpointer, followPointers)
+      return action
+    end
+  end
+  function mem_helper1(expr, mode :: Symbol = :assignment, accumulatePointers :: Bool = false, writeReferences :: Bool = false, reallocateImmutableRHSpointer :: Bool = false, followPointers :: Bool = false)
     if mode == :assignment
       @assert expr.head == :(=) "Expression for mutating must be an assignment (=)." # unless we use a->b->c
       RHS = expr.args[2]

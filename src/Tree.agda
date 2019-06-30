@@ -16,7 +16,7 @@ data Expr : Set where
 leftBalance : Expr → Expr
 leftBalance S                 = S
 leftBalance (e ⇒ S)           = e ⇒ S
-leftBalance (e ⇒ (f ⇒ g))     = leftBalance ((e ⇒ f) ⇒ g)
+leftBalance (e ⇒ (f ⇒ g))     = leftBalance ((leftBalance (e ⇒ f)) ⇒ g)
 leftBalance (e ⇒ E H [])      = (e ⇒ E H [])
 leftBalance (e ⇒ E H (a ∷ x)) = E H (leftBalance (leftBalance e ⇒ a) ∷ (map leftBalance x))
 leftBalance (E H x)           = E H (map leftBalance x)

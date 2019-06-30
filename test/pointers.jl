@@ -112,6 +112,16 @@ b3    =     B3(1.0f0,c3)
 a3    = Ref(A3(0.0f0,b3))
 a3ptr = Ptr{A3}(pointer_from_objref(a3))
 
+@assert unsafe_load(unsafe_load(a3ptr).b.c.d.e).f.g.x == @mem a3ptr->b.c.d.e->f.g.x
+@assert unsafe_load(unsafe_load(a3ptr).b.c.d.e).f.g   == @mem a3ptr->b.c.d.e->f.g
+@assert unsafe_load(unsafe_load(a3ptr).b.c.d.e).f     == @mem a3ptr->b.c.d.e->f
+@assert unsafe_load(unsafe_load(a3ptr).b.c.d.e)       == @mem a3ptr->b.c.d.e[]
+@assert             unsafe_load(a3ptr).b.c.d.e        == @mem a3ptr->b.c.d.e
+@assert             unsafe_load(a3ptr).b.c.d          == @mem a3ptr->b.c.d
+@assert             unsafe_load(a3ptr).b.c            == @mem a3ptr->b.c
+@assert             unsafe_load(a3ptr).b              == @mem a3ptr->b
+@assert             unsafe_load(a3ptr)                == @mem a3ptr[]
+
 test301(a::Ptr{A3},v::Float32) = @mem  a->b.c.d.e->f.g.x = v
 test302(a::Ptr{A3},v::G3)      = @mem  a->b.c.d.e->f.g = v
 test303(a::Ptr{A3},v::Float32) = @mem  a->b.c.d.e->f.x = v
