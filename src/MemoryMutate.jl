@@ -7,6 +7,7 @@ module MemoryMutate
   #    but this issue might be raised by `@assert`
   #  allow C-like syntax a->b->c in @mem and @ptr
   #    allow @mem to have no rhs then
+  # we could, for non-bitstypes, allow `@mem a = x` to implement `unsafe_store!(Ptr{A}(pointer_from_objref(a)), x)`
   # Another reason to support this is, that when a C function is given a pointer (e.g. because it takes it's argument by reference) which resides inside of an allocated bitstype struct …
   #   put in another way: when we want to pass a C-reference/pointer which refers to a part of an (immutable) bitstype, this has to be a pointer for Julia
   #   because casting it to a RefValue would require type (tag) information at that memory location, which is not present (i.e. you cannot "cast" a Ptr{T} into a RefValue{T})
@@ -17,6 +18,17 @@ module MemoryMutate
   #     @GC.preserve base f(ptr)
   #   the idea is, that @ptr stores the rightmost "Julia-GC-allocated" Julia-object into `base` that we can use then to preserve in `@GC.preserve`
   #     currently we need to manually guarantee that the pointers "lifetime" extends for the statement using it
+  # for the next version we might change some of the internals to better handle the cases where fieldoffsets cannot be statically determined
+  #   Nash 2016 - Inference Convergence Algorithm in Julia
+  #     https://juliacomputing.com/blog/2016/04/04/inference-convergence.html
+  #   Optionally-generated functions
+  #     https://docs.julialang.org/en/v1/manual/metaprogramming/index.html#Optionally-generated-functions-1
+  #   we also might want to "fuse" all such fieldknowledge-collecting functions using
+  #     for (n,fA) in enumerate(fieldnames(T))
+  #       push!(exprs, :( f == $(QuoteNode(fA)) && ($sym_idx = … something where f ≡ fA … ) ))
+  #     end
+  #   into a single one
+  #   in order to do so, we could use a naming scheme for the generated variables of the different "levels", using `parentN` and `childN` for more clarity
   # the GMSH API shows how to pass allocated memory to Julia (does it?)
   #    function getElements(dim = -1, tag = -1)
   #      api_elementTypes_ = Ref{Ptr{Cint}}()
@@ -38,20 +50,20 @@ module MemoryMutate
   #   @c CImGui.ShowDemoWindow(&show_demo_window)
   #  i.e.
   #    @macroexpand @c f(&x)
-  #    ##cref#378 = Ref(x)
-  #    ##cref_ret#379 = f(##cref#378)
-  #    x = ##cref#378[]
-  #    ##cref_ret#379
+  #      cref     = Ref(x)
+  #      cref_ret = f(cref)
+  #      x        = cref[]
+  #      cref_ret
   #  it is also using
   #   @cstatic f=Cfloat(0.0) counter=Cint(0) begin … @c CImGui.SliderFloat("float", &f, 0, 1) … end
   #  i.e.
   #   @macroexpand @cstatic f=Cfloat(0.0) begin; foo; end
-  #   let global ##static_f#377
-  #       local f = ##static_f#377
+  #   let global static_f
+  #       local f = static_f
   #      begin
   #        foo
   #      end
-  #      ##static_f#377 = f
+  #      static_f = f
   #      f
   #    end
 
@@ -156,7 +168,6 @@ module MemoryMutate
           if isbitstype(ftype) # write a bitstype into the memory at `ptr`
             mode == :assignment && ( action = :( @GC.preserve base unsafe_store!(reinterpret(Ptr{$(ftype)},ptr),rhs) ) )
             mode == :pointer    && ( action = :(                                 reinterpret(Ptr{$(ftype)},ptr)      ) )
-            println(action)
           elseif writeReferences # write a reference into the memory at `ptr`
             if ftype.mutable # `rhs` is already allocated and `pointer_from_objref(rhs)` is valid
               mode == :assignment && (
@@ -279,8 +290,10 @@ module MemoryMutate
   pointer_from_objref_typed(x :: T) where T = reinterpret(Ptr{T},pointer_from_objref(x))
 
   # see Tree.agda
-  # leftBalance(:(a.b.c.d->e.f.g.x = v))
-  #   :((((a.b).c).d->((e.f).g).x) = v)
+  #   :(a.b.c.d->e.f.g.x = v) == :( ((a.b).c).d -> (((e.f).g).x = v) )
+  #     true
+  #   leftBalance(:( ((a.b).c).d -> (((e.f).g).x = v) ))
+  #     :(((((((a.b).c).d->e)).f).g).x = v)
   function leftBalance(expr)
     # println()
     # println(expr)
@@ -333,8 +346,17 @@ module MemoryMutate
   # # We use unsafe_load(reinterpret(Ptr{Ptr{Nothing}},Ref(rhs))) to obtain a pointer in that case.
   # const reallocateImmutableRHSpointer = true
 
-  getfieldorpointer(x::T,f::Symbol,idx::UInt64) where {T} = getfield(x,f)
-  getfieldorpointer(x::Ptr{T},f::Symbol,idx::UInt64) where {T} = Ptr{fieldtypes(T)[idx]}(x+fieldoffset(T,idx))
+  @inline getfieldorpointer(x::T,f::Symbol,idx::UInt64) where {T} = getfield(x,f)
+  # @inline getfieldorpointer(x::Ptr{T},f::Symbol,idx::UInt64) where {T} = Ptr{fieldtypes(T)[idx]}(x+fieldoffset(T,idx))
+  @generated function getfieldorpointer(x::Ptr{T},f::Symbol,idx::UInt64) where {T}
+    sym_res = gensym()
+    exprs = [:( $sym_res = false )]
+    for (n,fA) in enumerate(fieldnames(T))
+      push!(exprs, :( f == $(QuoteNode(fA)) && ($sym_res = Ptr{$(fieldtypes(T)[n])}(x+$(fieldoffset(T,n)))  ) ))
+    end
+    push!(exprs, :( return $sym_res ))
+    return Expr(:block,exprs...)
+  end
 
   # structinfo(T) = [(fieldoffset(T,i), fieldname(T,i), fieldtype(T,i)) for i = 1:getfieldcount(T)];
   function mem_helper(expr, mode :: Symbol = :assignment, accumulatePointers :: Bool = false, writeReferences :: Bool = false, reallocateImmutableRHSpointer :: Bool = false, followPointers :: Bool = false)
@@ -370,8 +392,8 @@ module MemoryMutate
       elseif followPointers && cur isa Expr && cur.head == :(->)
         pushfirst!(cases,:getfield)
         # e.g. in a.b->c.d we have, that a and c aren't QuoteNodes anymore, which is okay for a, but noch for c
-        if length(levels) > 0 && cur.args[2] isa Symbol; pushfirst!(levels,QuoteNode(cur.args[2]))
-        else                                           ; pushfirst!(levels,          cur.args[2] )
+        if cur.args[2] isa Symbol; pushfirst!(levels,QuoteNode(cur.args[2]))
+        else                     ; pushfirst!(levels,          cur.args[2] )
         end
         cur = cur.args[1] # LineNumberNodes are already filtered out by leftBalance
       else
@@ -384,6 +406,7 @@ module MemoryMutate
     # println(collect(zip(levels,cases)))
 
     # for each level, generate symbols to hold
+    # TODO: name these `parent` and `child` for more clarity
     sym_val = [] # every level produces the parent-value for the next level
     sym_ptr = [] # the cumulated pointer from the first mutable/reference
     # sym_typ = [] # the type of `val`. It turned out, that it's necessary to use generic or generated functions to obtain compiler constants for the type's properties instead of using the type directly. That is why we introduce `fld`, `idx`, `bit`, `ref` and `mut`.
