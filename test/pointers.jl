@@ -22,6 +22,11 @@ function setat(ptr::Ptr{T},i::Int64,x::T) where T
     view[1] = x
 end
 
+arr = Float32[0f0,1f0,2f0,3f0,4f0]
+arrptr = pointer(arr)
+v = 0f0; @assert arr[2] != v; @mem arrptr[2] = v; @assert arr[2] == v;
+
+
 ################################################################################
 
         struct G2; x :: Float32;               end # struct G2 { const float x; };
