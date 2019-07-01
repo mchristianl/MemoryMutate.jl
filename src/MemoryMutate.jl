@@ -28,6 +28,11 @@ module MemoryMutate
   #     end
   #   into a single one
   #   in order to do so, we could use a naming scheme for the generated variables of the different "levels", using `parentN` and `childN` for more clarity
+  #   Furthermore, instead of generating nested if-blocks, we might just propagate locally the most "current" arguments, having a single `unsafe_store_generated2` call at the end
+  #     is this an issue somehow for constant resolving?
+  #   Currently, we avoid to pass around types in variables.
+  #     If the compiler can create compiler-constants out of these, it might be a more elegant approch.
+  #     But to obtain type properties, e.g. offsets, in a statical way, it was necessary to generate a case for every field.
   # the GMSH API shows how to pass allocated memory to Julia (does it?)
   #    function getElements(dim = -1, tag = -1)
   #      api_elementTypes_ = Ref{Ptr{Cint}}()
@@ -75,8 +80,17 @@ module MemoryMutate
   # TODO: may fuse fieldindex_generated, fieldisbitstype_generated and fieldisimmutable_generated into a single function
   # TODO: spread a few assertions with descriptive error messages
 
-  # statically unroll the cases for all fieldnames of T
-  @generated function (fieldindex_generated(v::T, f::Symbol)::UInt64) where T
+  # RPtr: this Ptr-wrapper is to distinguish values that we treat lazily by their pointers (RPtr) from real pointer values (Ptr)
+  #   e.g. if we are given a pointer to some struct and want to access some field of it, then one can avoid to unsafe_load the whole struct and refer to that value by just adding the field's offset to the given pointer (and reinterpret that pointer)
+  #   what comes out of that procedure is an RPtr{T} then: it should behave like T for all our purposes, but we alerady know that T's memory location
+  struct RPtr{T}; x::Ptr{T}; end
+  Base.show(io::IO,ptr::RPtr{T}) where T = print(io,"R"*repr(ptr.x))
+
+  # fieldindex_generated: obtain a field's index from its Symbol. this is due to `fieldoffset` requiring an integer instead of a symbol
+  #  statically unrolls the cases for all fieldnames of T
+  (fieldindex_generated(::          T  , f::Symbol)::UInt64) where T = fieldindex_generated(T,f)
+  (fieldindex_generated(::Type{RPtr{T}}, f::Symbol)::UInt64) where T = fieldindex_generated(T,f)
+  @generated function (fieldindex_generated(::Type{T}, f::Symbol)::UInt64) where T
     # inside the generated function macro, parameters and their type are the same, e.g. v == T
     if T <: Ptr; T = T.parameters[1]; end
     sym_idx = gensym()
@@ -90,8 +104,11 @@ module MemoryMutate
 
   isbitstypeandnotapointer(T::Type) = isbitstype(T) && ~(T <: Ptr)
 
-  # statically unroll the cases for all fieldnames of T
-  @generated function fieldisbitstype_generated(::T,f::Symbol) where T
+  # fieldisbitstype_generated: obtains whether a field is a bitstype from its name
+  #  statically unrolls the cases for all fieldnames of T
+  fieldisbitstype_generated(::          T  ,f::Symbol) where T = fieldisbitstype_generated(T,f)
+  fieldisbitstype_generated(::Type{RPtr{T}},f::Symbol) where T = fieldisbitstype_generated(T,f)
+  @generated function fieldisbitstype_generated(::Type{T},f::Symbol) where T
     # inside the generated function macro, parameters and their type are the same, e.g. v == T
     sym_bit = gensym()
     exprs = [:( $sym_bit = false )]
@@ -102,8 +119,11 @@ module MemoryMutate
     return Expr(:block,exprs...)
   end
 
-  # statically unroll the cases for all fieldnames of T
-  @generated function fieldisimmutable_generated(::T,f::Symbol) where T
+  # fieldisimmutable_generated: obtain wheter a field is immutable from its name
+  #  statically unrolls the cases for all fieldnames of T
+  fieldisimmutable_generated(::          T  ,f::Symbol) where T = fieldisimmutable_generated(T,f)
+  fieldisimmutable_generated(::Type{RPtr{T}},f::Symbol) where T = fieldisimmutable_generated(T,f)
+  @generated function fieldisimmutable_generated(::Type{T},f::Symbol) where T
     # inside the generated function macro, parameters and their type are the same, e.g. v == T
     sym_imm = gensym()
     exprs = [:( $sym_imm = false )]
@@ -114,138 +134,26 @@ module MemoryMutate
     return Expr(:block,exprs...)
   end
 
-  fieldisbitstype_static(::T, f::Symbol) where T = isbitstype(fieldtype(T,f))
+  # static variants suffice to obtain properties of value's types
+  refisbitstype_static(x::RPtr{T}) where T = refisbitstype_static(x.x)
+  refisbitstype_static(::Ptr{T}) where T = isbitstype(T)
   refisbitstype_static(::Ref{T}) where T = isbitstype(T)
   refisbitstype_static(::NTuple{N,T}) where {N,T} = isbitstype(T)
   refisbitstype_static(::SArray{E,T,N,M}) where {E,T,N,M} = isbitstype(T)
+  # fieldisbitstype_static(::T, f::Symbol) where T = isbitstype(fieldtype(T,f))
   ismutable_static(::T) where T = T.mutable
   isreference_static(::T) where T = T <: Ref # note, that we have Ptr <: Ref
-  (fieldoffset_static(::T, i::UInt64)::Int64) where T = fieldoffset(T,i)
-  (fieldoffset_static(::Ptr{T}, i::UInt64)::Int64) where T = fieldoffset(T,i)
+  (fieldoffset_static(::         T  , i::UInt64)::Int64) where T = fieldoffset(T,i)
+  (fieldoffset_static(::RPtr{    T }, i::UInt64)::Int64) where T = fieldoffset(T,i)
+  (fieldoffset_static(:: Ptr{    T }, i::UInt64)::Int64) where T = fieldoffset(T,i)
+  (fieldoffset_static(::RPtr{Ptr{T}}, i::UInt64)::Int64) where T = fieldoffset(T,i)
 
-  pointer_or_pointer_from_objref(x::T) where T = pointer_from_objref(x)
-  pointer_or_pointer_from_objref(x::Ptr{T}) where T = x
-
-  @inline @generated function unsafe_store_generated2(::Val{mode},::T,f::S,base::B,off::Int64,rhs::R,ptr::P,::Val{accumulatePointers},::Val{writeReferences},::Val{reallocateImmutableRHSpointer}) where {mode,T,S<:Union{Symbol,Nothing},B,R,P<:Union{Ptr,Nothing},accumulatePointers,writeReferences,reallocateImmutableRHSpointer}
-    exprs = []
-    sym_tmp = gensym("tmp")
-    fnames = []
-    ftypes = []
-    if T <: SArray || T <: NTuple
-      fnames = [:nothing]
-      ftypes = [T.parameters[2]]
-    elseif T <: Ptr
-      fnames = fieldnames(T.parameters[1])
-      ftypes = fieldtypes(T.parameters[1])
-    else
-      fnames = fieldnames(T)
-      ftypes = fieldtypes(T)
-    end
-    if B <: Ptr && S <: Nothing # write directly to the pointer
-      mode == :assignment && push!(exprs, :( @GC.preserve base unsafe_store!(base+off,rhs) ) )
-      mode == :pointer    && push!(exprs, :(                                 base+off      ) )
-    else # write to the designated place
-      for (n,(fname,ftype)) in enumerate(zip(fnames,ftypes))
-        action = :()
-        if B.mutable || B <: Ptr # B is mutable, so `pointer_from_objref(base)` is valid
-          if isbitstype(ftype) # write a bitstype into the memory of `base`
-            mode == :assignment && ( action = :( @GC.preserve base unsafe_store!(reinterpret(Ptr{$(ftype)},pointer_or_pointer_from_objref(base)+off),rhs) ) )
-            mode == :pointer    && ( action = :(                                 reinterpret(Ptr{$(ftype)},pointer_or_pointer_from_objref(base)+off)      ) )
-          elseif writeReferences # write a reference into the memory of `base`
-            # if the field we want to write to is not a bitstype, then we end up with it's parent as the `base`
-            # in that case, we are at the second-to-last level, where the normal assignment can be used
-            # so we do not see this case
-            mode == :assignment && (
-              action = :( @assert isa(rhs,$(ftype)) "The value to assign is of type '$($(R))', but the field to assign it to is of type '$($(ftype))'";
-                @GC.preserve base unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},pointer_or_pointer_from_objref(base)+off),pointer_from_objref(rhs)) ) )
-            mode == :pointer    && ( action = :(reinterpret(Ptr{Ptr{Nothing}},pointer_or_pointer_from_objref(base)+off)                           ) )
-          else
-            # we do not see this case either
-            action = :(error("""
-              From type '$($T)' the field '$($(QuoteNode(fname)))' is of type '$($ftype)' and it is located in type '$($(B))' at offset $(off).
-              The field type '$($ftype)' is a non-bitstype. You need to set 'writeReferences = true' to enable this operation.
-              """))
-          end
-        elseif accumulatePointers # B is immutable, so we cannot use `pointer_from_objref(base)` and use an accumulated pointer instead
-          if P != Nothing # if we have such pointer, we can use it
-            if isbitstype(ftype) # write a bitstype into the memory at `ptr`
-              mode == :assignment && ( action = :( @GC.preserve base unsafe_store!(reinterpret(Ptr{$(ftype)},ptr),rhs) ) )
-              mode == :pointer    && ( action = :(                                 reinterpret(Ptr{$(ftype)},ptr)      ) )
-            elseif writeReferences # write a reference into the memory at `ptr`
-              if ftype.mutable # `rhs` is already allocated and `pointer_from_objref(rhs)` is valid
-                mode == :assignment && (
-                  action = :( @assert isa(rhs,$(ftype)) "The value to assign is of type '$($(R))', but the field to assign it to is of type '$($(ftype))'";
-                    @GC.preserve base unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},ptr),pointer_from_objref(rhs)) ) )
-                mode == :pointer    && ( action = :(reinterpret(Ptr{Ptr{Nothing}},ptr) ) )
-              elseif reallocateImmutableRHSpointer # we need to allocate `rhs` with `Ref`
-                mode == :assignment && (
-                  action = :( @assert isa(rhs,$(ftype)) "The value to assign is of type '$($(R))', but the field to assign it to is of type '$($(ftype))'";
-                    $sym_tmp = Ref(rhs);
-                    @GC.preserve base $sym_tmp unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},ptr),unsafe_load(reinterpret(Ptr{Ptr{Nothing}},pointer_from_objref($sym_tmp)))) ) )
-                mode == :pointer && ( action = :(            reinterpret(Ptr{Ptr{Nothing}},ptr)                                                                            ) )
-              else
-                action = :(error("""
-                The given right hand side is of type '$($(R))' which is an immutable non-isbitstype.
-                You need to set 'reallocateImmutableRHSpointer = true' to enable this operation.
-                """))
-              end
-            else
-              action = :(error("""
-              From type '$($T)' the field '$($(QuoteNode(fname)))' is of type '$($(ftype))' and it is located in type '$($(B))' at offset $(off).
-              This is a non-bitstype. You need to set 'writeReferences = true' to enable this operation.
-              """))
-            end
-          else
-            action = :(error("""There is neither a reference, nor a mutable present in the assigment to be used as a base pointer."""))
-          end
-        else
-          action = :(error("""
-            From type '$($T)' the field '$($(QuoteNode(fname)))' is of type '$($(ftype))' and it is located in type '$($(B))' at offset $(off).
-            The base type '$($(B))' is immutable. You need to set 'accumulatePointers = true' to enable this operation.
-            """))
-        end
-        if T <: SArray || T <: NTuple
-          push!(exprs,:( $action )) # NOTE: this is set up to be just executed once
-        else
-          push!(exprs,:( f == $(QuoteNode(fname)) && return ($action) ))
-        end
-      end
-    end
-    # push!(exprs,:( error("the field '$($(QuoteNode(fname)))' was not found in type '$($(T))'") ))
-    return Expr(:block,exprs...)
-    # return :(println($exprs))
-  end
-  # fallback for assigning references
-  @inline unsafe_store_generated2(::Val{:assignment}, ::Ref,::Nothing,base,basebase,off::Int64,rhs,_,_,_) = (base[] = rhs) # @assert isa(base,Ref), @assert off == 0
-  @inline unsafe_store_generated2(::Val{:pointer}, ::Ref{T},::Nothing,base,basebase,off::Int64,rhs,_,_,_) where T = reinterpret(Ptr{T},pointer_from_objref(base)) # @assert isa(base,Ref), @assert off == 0
-
-  # unroll the cases for all fieldnames of T
-  @generated function unsafe_store_generated(::T,f::Symbol,base,off::Int64,rhs) where T
-    exprs = []
-    for (n,fA) in enumerate(fieldnames(T))
-      push!(exprs,
-        :( f == $(QuoteNode(fA))
-        && ( @assert $(isbitstype(fieldtypes(T)[n])) """
-              From type '$($T)', the field '$($(QuoteNode(fA)))' to be set is itself of type '$($(fieldtypes(T)[n]))', which is not bitstype.
-              This means that the value of field '$($(QuoteNode(fA)))' is an immutable reference
-              and it is opaque to us (is it?) how that is represented in memory (a pointer, for sure) and whether other objects rely on this to be constant.
-              If it would be of type 'Ref{$($(fieldtypes(T)[n]))}' we'd  had a chance to replace it in the memory of it's parent '$($T)'.
-              """
-           ; @GC.preserve base unsafe_store!(reinterpret(Ptr{$(fieldtypes(T)[n])},pointer_from_objref(base)+off),rhs)
-           )
-        ))
-    end
-    return Expr(:block,exprs...)
-  end
-  # fallback for assigning references
-  unsafe_store_generated(::T,::Nothing,base,off::Int64,rhs) where T = (base[] = rhs) # @assert isa(base,Ref), @assert off == 0
-
-  setfield_or_deref(::Val{:assignment},x::T,f::Symbol,rhs) where T = setfield!(x,f,rhs)
-  setfield_or_deref(::Val{:assignment},x::T,::Nothing,rhs) where T = (x[] = rhs)
-  setfield_or_deref(::Val{:pointer},x::T,f::Symbol,rhs) where T = reinterpret(Ptr{fieldtype(T,f)},pointer_from_objref(x)+fieldoffset(T,fieldindex_generated(x,f))) # TODO: check whether this optimizes statically
-  setfield_or_deref(::Val{:pointer},x::Ref{T},::Nothing,rhs) where T = reinterpret(Ptr{T},pointer_from_objref(x))
-  fieldtype_static(::T, f::Symbol) where T = fieldtype(T,f)
-
+  # some convenience  utilities
+  pointer_or_pointer_from_objref(x::         T  ) where T = pointer_from_objref(x)
+  pointer_or_pointer_from_objref(x::     Ptr{T} ) where T = x
+  pointer_or_pointer_from_objref(x::RPtr{    T }) where T = x.x
+  pointer_or_pointer_from_objref(x::RPtr{Ptr{T}}) where T = unsafe_load(x.x) # lazily dereference a RPtr
+  pointer_from_objref_typed(x :: T) where T = reinterpret(Ptr{T},pointer_from_objref(x))
   function cumprod_SimpleVector(v :: Core.SimpleVector)
     c = [1]
     for n = 1:length(v)-1
@@ -253,53 +161,221 @@ module MemoryMutate
     end
     return c
   end
+  structinfo(T) = [(fieldoffset(T,i), fieldname(T,i), fieldtype(T,i)) for i = 1:getfieldcount(T)];
+  # derefPtrPtr(x::T) where T = x
+  # derefPtrPtr(x::Ptr{Ptr{T}}) where T = unsafe_load(x)
+  # derefRPtr(x::T) where T = x
+  # derefRPtr(x::RPtr{Ptr{T}}) where T = unsafe_load(x.x)
+  PtrOrNothing(x::    T ) where T = nothing
+  PtrOrNothing(x::Ptr{T}) where T = Ptr{Nothing}(x)
 
-  indexoffset_static(t,prev::Int64) = Int64(0)
-  # @generated function (indexoffset_static(t::Array{T,N}, indices...) :: UInt64) where {T,N}
-  #   sym = gensym()
-  #   return :( $sym = strides(t); $() )
-  # end
-  @generated function (indexoffset_static(t::SArray{E,T,N,M}, prev::Int64, indices...) :: Int64) where {E,T,N,M}
-    sym = gensym()
-    dims = E.parameters
+  # unsafe_store_generated2:
+  #  from the collected information, an `unsafe_store`-statement is set up to perform the operation
+  #  this function generates just a single statement, or a statement for every field in `T` ("unrolling" T's fields)
+  #    NOTE: the unrolling was necessary 'just' for a correct pointer-type in `unsafe_store` that can be optimized out
+  #  this is the final call
+  # arguments:
+  #        :: T      = the parent, containing the field to be set and it's memory, (but it might be a bitstype, so unaccessable for `pointer_from_objref`)
+  #   f    :: S      = the field's Symbol or Nothing, when an index was used
+  #                    TODO: this is redundant: the offset was already calculated before; we just need this here again, to provide the right type for Ptr in `unsafe_store!`
+  #                          this kind of redundancies occurs to avoid, passing around types in variables ... which could also be a possible approach
+  #   base :: B      = the rightmost non-bitstype in an access sequence, which also contains the field's memory to be set, but might not be the immediate parent of that field (i.e. where `pointer_from_objref` could be used)
+  #                    nested if-statements are generated to provide this
+  #   off  :: Int64  = the offset relative to a pointer to `base`, where the target field resides
+  #   rhs  :: R      = the right hand side to be assigned
+  #   ptr  :: P      = a Ptr{Nothing}, tracked for `base` in cases where `pointer_from_objref` cannot be used (i.e. `base` is immutable)
+  #                    this `ptr` has the offset already added
+  #                    TODO: if we could track the pointer's type from the outside, the unrolling could be saved (we already do so with `val` if it becomes a pointer)
+  # flags:
+  #   mode
+  #   accumulatePointers
+  #   writeReferences
+  #   reallocateImmutableRHSpointer
+  @inline @generated function unsafe_store_generated2(::Val{mode},::T,f::S,base::B,off::Int64,rhs::R,ptr::P,::Val{accumulatePointers},::Val{writeReferences},::Val{reallocateImmutableRHSpointer}) where {mode,T,S<:Union{Symbol,Nothing},B,R,P<:Union{Ptr,Nothing},accumulatePointers,writeReferences,reallocateImmutableRHSpointer}
+    U = T <: RPtr ? T.parameters[1] : T
+    exprs = []
+    # exprs = [:( println("T = $($T)"); println("U = $($U)"); println("B = $($B)"); println("P = $($P)"); println("off = $off"); println("f = $(repr(f))") )]
+    sym_tmp = gensym("tmp")
+    fnames = []
+    ftypes = []
+    unrolling = true
+    if U <: SArray || U <: NTuple
+      unrolling = false
+      fnames = [:nothing]
+      ftypes = [U.parameters[2]]
+    elseif U <: Ptr
+      V = U.parameters[1]
+      # push!(exprs,:( println("V = $($V)") ))
+      # unrolling = false
+      # fnames = [:nothing]
+      # ftypes = [V]
+      # if S <: Nothing # write directly to the pointer
+      #   unrolling = false
+      #   fnames = [:nothing]
+      #   ftypes = [V]
+      if V <: SArray || V <: NTuple
+        unrolling = false
+        fnames = [:nothing]
+        ftypes = [V.parameters[2]]
+      elseif S <: Nothing # unrolling would create statements of the form `nothing == ...` which have no effect
+        unrolling = false
+        fnames = [:nothing]
+        ftypes = [V]
+      else
+        unrolling = true
+        fnames = fieldnames(V)
+        ftypes = fieldtypes(V)
+      end
+    else
+      unrolling = true
+      fnames = fieldnames(U)
+      ftypes = fieldtypes(U)
+    end
+    for (n,(fname,ftype)) in enumerate(zip(fnames,ftypes))
+      action = :()
+      if B.mutable || B <: RPtr || B <: Ptr # B is mutable, so `pointer_from_objref(base)` is valid
+        if isbitstype(ftype) # write a bitstype into the memory of `base`
+          mode == :assignment && ( action = :( @GC.preserve base unsafe_store!(reinterpret(Ptr{$(ftype)},pointer_or_pointer_from_objref(base)+off),rhs) ) )
+          mode == :pointer    && ( action = :(                                 reinterpret(Ptr{$(ftype)},pointer_or_pointer_from_objref(base)+off)      ) )
+        elseif writeReferences # write a reference into the memory of `base`
+          # if the field we want to write to is not a bitstype, then we end up with it's parent as the `base`
+          # in that case, we are at the second-to-last level, where the normal assignment can be used
+          # so we do not see this case
+          mode == :assignment && (
+            action = :( @assert isa(rhs,$(ftype)) "The value to assign is of type '$($(R))', but the field to assign it to is of type '$($(ftype))'";
+              @GC.preserve base unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},pointer_or_pointer_from_objref(base)+off),pointer_from_objref(rhs)) ) )
+          mode == :pointer    && ( action = :(reinterpret(Ptr{Ptr{Nothing}},pointer_or_pointer_from_objref(base)+off)                           ) )
+        else
+          # we do not see this case either
+          action = :(error("""
+            From type '$($T)' the field '$($(QuoteNode(fname)))' is of type '$($ftype)' and it is located in type '$($(B))' at offset $(off).
+            The field type '$($ftype)' is a non-bitstype. You need to set 'writeReferences = true' to enable this operation.
+            """))
+        end
+      elseif accumulatePointers # B is immutable, so we cannot use `pointer_from_objref(base)` and use an accumulated pointer instead
+        if P != Nothing # if we have such pointer, we can use it
+          if isbitstype(ftype) # write a bitstype into the memory at `ptr`
+            mode == :assignment && ( action = :( @GC.preserve base unsafe_store!(reinterpret(Ptr{$(ftype)},ptr),rhs) ) )
+            mode == :pointer    && ( action = :(                                 reinterpret(Ptr{$(ftype)},ptr)      ) )
+          elseif writeReferences # write a reference into the memory at `ptr`
+            if ftype.mutable # `rhs` is already allocated and `pointer_from_objref(rhs)` is valid
+              mode == :assignment && (
+                action = :( @assert isa(rhs,$(ftype)) "The value to assign is of type '$($(R))', but the field to assign it to is of type '$($(ftype))'";
+                  @GC.preserve base unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},ptr),pointer_from_objref(rhs)) ) )
+              mode == :pointer    && ( action = :(reinterpret(Ptr{Ptr{Nothing}},ptr) ) )
+            elseif reallocateImmutableRHSpointer # we need to allocate `rhs` with `Ref`
+              # TODO: can use just `Ptr{Ptr{Nothing}}(pointer_from_objref($sym_tmp))`
+              mode == :assignment && (
+                action = :( @assert isa(rhs,$(ftype)) "The value to assign is of type '$($(R))', but the field to assign it to is of type '$($(ftype))'";
+                  $sym_tmp = Ref(rhs);
+                  @GC.preserve base $sym_tmp unsafe_store!(reinterpret(Ptr{Ptr{Nothing}},ptr),unsafe_load(reinterpret(Ptr{Ptr{Nothing}},pointer_from_objref($sym_tmp)))) ) )
+              mode == :pointer && ( action = :(            reinterpret(Ptr{Ptr{Nothing}},ptr)                                                                            ) )
+            else
+              action = :(error("""
+              The given right hand side is of type '$($(R))' which is an immutable non-isbitstype.
+              You need to set 'reallocateImmutableRHSpointer = true' to enable this operation.
+              """))
+            end
+          else
+            action = :(error("""
+            From type '$($T)' the field '$($(QuoteNode(fname)))' is of type '$($(ftype))' and it is located in type '$($(B))' at offset $(off).
+            This is a non-bitstype. You need to set 'writeReferences = true' to enable this operation.
+            """))
+          end
+        else
+          action = :(error("""There is neither a reference, nor a mutable present in the assigment to be used as a base pointer."""))
+        end
+      else
+        action = :(error("""
+          From type '$($T)' the field '$($(QuoteNode(fname)))' is of type '$($(ftype))' and it is located in type '$($(B))' at offset $(off).
+          The base type '$($(B))' is immutable. You need to set 'accumulatePointers = true' to enable this operation.
+          """))
+      end
+      # push!(exprs,:( println( $(repr(action)) ) ))
+      if unrolling
+        push!(exprs,:( f == $(QuoteNode(fname)) && return ($action) ))
+      else
+        push!(exprs,:( $action )) # NOTE: this is set up to be just executed once (so no "unrolling" in this case)
+      end
+    end
+    # push!(exprs,:( error("the field '$($(QuoteNode(fname)))' was not found in type '$($(T))'") ))
+    return Expr(:block,exprs...)
+    # return :(println($exprs))
+  end
+  # fallback for assigning references
+  @inline #= TODO: check these ones! =# unsafe_store_generated2(::Val{:assignment}, ::Ref,::Nothing,base::     B ,off::Int64,rhs,_,_,_) where    B  = (base[] = rhs) # @assert isa(base,Ref), @assert off == 0
+  @inline #= TODO: check these ones! =# unsafe_store_generated2(::Val{:pointer}, ::Ref{T},::Nothing,base::     B ,off::Int64,rhs,_,_,_) where {T,B} = reinterpret(Ptr{T},pointer_from_objref(base)) # @assert isa(base,Ref), @assert off == 0
+  @inline #= TODO: check these ones! =# unsafe_store_generated2(::Val{:assignment}, ::Ref,::Nothing,base::RPtr{B},off::Int64,rhs,_,_,_) where    B  = (unsafe_load(base.x)[] = rhs)
+  @inline #= TODO: check these ones! =# unsafe_store_generated2(::Val{:pointer}, ::Ref{T},::Nothing,base::RPtr{B},off::Int64,rhs,_,_,_) where {T,B} = reinterpret(Ptr{T},base.x)
+
+  # a fallback for easy cases
+  setfield_or_deref(::Val{:assignment},x::    T ,f::Symbol ,rhs) where T = setfield!(x,f,rhs)
+  setfield_or_deref(::Val{:assignment},x::    T , ::Nothing,rhs) where T = (x[] = rhs)
+  setfield_or_deref(::Val{:pointer   },x::    T ,f::Symbol ,rhs) where T = reinterpret(Ptr{fieldtype(T,f)},pointer_from_objref(x)+fieldoffset(T,fieldindex_generated(x,f))) # TODO: check whether this also optimizes statically
+  setfield_or_deref(::Val{:pointer   },x::Ref{T}, ::Nothing,rhs) where T = reinterpret(Ptr{          T   },pointer_from_objref(x)                                         )
+  # fieldtype_static(::T, f::Symbol) where T = fieldtype(T,f)
+
+
+  # indexoffset_static: calculate an offset from indices and a type
+  (                    indexoffset_static(::              T      , prev::Int64, indices...)::Int64) where T = indexoffset_static(T, prev, indices...) # wrapper to pass a variable, but we are only interested in types
+  (                    indexoffset_static(::Type{RPtr{    T    }}, prev::Int64, indices...)::Int64) where T = indexoffset_static(T,    0, indices...) # behave like T, but discard the previous offset
+  (                    indexoffset_static(::Type{         T     }, prev::Int64            )::Int64) where T = Int64(0) # if there is no index, then we are dereferencing (!) and discard the previous offset (TODO: this logic should not belong to here)
+  @generated function (indexoffset_static(::Type{SArray{E,T,N,M}}, prev::Int64, indices...)::Int64) where {E,T,N,M} # obtain the offset into a SArray (which is inlined and therefore we add the previous offset)
+    sym     = gensym()
+    dims    = E.parameters
     strides = MemoryMutate.cumprod_SimpleVector(dims)
-    elsize = T.isbitstype ? sizeof(T) : sizeof(Ptr{Nothing}) # nonbitstypes are stored as "hidden references"/pointers
-    index = Expr(:call,:+,[:( (indices[$i]-1)*($s) ) for (i,s) in enumerate(strides)]...)
+    elsize  = T.isbitstype ? sizeof(T) : sizeof(Ptr{Nothing}) # nonbitstypes are stored as "hidden references"/pointers
+    index   = Expr(:call,:+,[:( (indices[$i]-1)*($s) ) for (i,s) in enumerate(strides)]...)
     return T.isbitstype ? :( prev + $index * $elsize ) : :( $index * $elsize ) # if T is not a bitstype, then the array is not a bitstype and we will receive a pointer to the beginning of the array so the previous index has to be discarded
   end
-  @generated function (indexoffset_static(t::NTuple{N,T}, prev::Int64, indices...) :: Int64) where {N,T}
+  @generated function (indexoffset_static(::Type{NTuple{N,T}}, prev::Int64, indices...) :: Int64) where {N,T} # obtain the offset into a NTuple (which is inlined and therefore we add the previous offset)
     elsize = T.isbitstype ? sizeof(T) : sizeof(Ptr{Nothing}) # nonbitstypes are stored as "hidden references"/pointers
-    index = :( indices[1]-1 )
+    index  = :( indices[1]-1 )
     return T.isbitstype ? :( prev + $index * $elsize ) : :( $index * $elsize ) # if T is not a bitstype, then the array is not a bitstype and we will receive a pointer to the beginning of the array so the previous index has to be discarded
   end
-  indexoffset_static(t::Ptr{T}, prev::Int64) where T = Int64(0)
-  @generated function (indexoffset_static(t::Ptr{T}, prev::Int64, indices...) :: Int64) where {T}
+  (                    indexoffset_static(::Type{Ptr{T}}, prev::Int64            )::Int64) where T = Int64(0) # if there is no index, then we are dereferencing (!) and discard the previous offset (TODO: this logic should not belong to here)
+  @generated function (indexoffset_static(::Type{Ptr{T}}, prev::Int64, indices...)::Int64) where {T} # obtain the offset into a Ptr as a C-Style Array (which is not inlined and therefore discard the previous offset)
     # @assert prev == 0
     elsize = T.isbitstype ? sizeof(T) : sizeof(Ptr{Nothing}) # nonbitstypes are stored as "hidden references"/pointers
-    index = :( indices[1]-1 )
+    index  = :( indices[1]-1 )
     return :( $index * $elsize )
   end
 
+  # fieldpointer_static: obtain the pointer to a field within some datatype
+  #   TODO: this seems in some sense redundant now, we have this one and a combination of indexoffset_static + some cases in unsafe_store_generated2
+  #         BUT, here we cover the part of Julia-references to be overwritten in unsafe_store_generated2, when accumulatePointers is set
+  # NOTE: see `getfieldorpointer`
   @generated function fieldpointer_static(basebase,base::T,off::Int64,prev::Ptr)::Ptr{Nothing} where T
     return (
         T <: Ptr
-      ? :(base+off)
+      ? :(base+off) # if we are already a pointer, then just add the offset and discard the previous offset
       : T.mutable
-      ? :( pointer_from_objref(base)+off )
+      ? :( pointer_from_objref(base)+off ) # if we are mutable, the use `pointer_from_objref`, add the offset and discard the previous offset
       : T.isbitstype
-      ? :( prev+off )
-      : (T <: SArray || T <: MArray) # TODO: MArray? at least throw an error
-      ? :( @GC.preserve basebase unsafe_load(unsafe_load(reinterpret(Ptr{Ptr{Ptr{Nothing}}},prev)))+off ) # sizeof(SArray{Tuple{N},SomeNonIsBitsType,1,N}) == 8 ⇒ it seems that SArray of non-isbits types allocates a single, intermediate array (we perform double dereferencing here)
-      : :( @GC.preserve basebase unsafe_load(reinterpret(Ptr{Ptr{Nothing}},prev))+off )
+      ? :( prev+off ) # if we are a bitstype, then we're inlined, so just add the offset to the previous offset
+      : (T <: SArray || T <: NTuple || T <: MArray) # NOTE: this is for non-bitstype (i.e. non-inlined) SArrays/NTuples. TODO: MArray? at least throw an error
+      ? :( @GC.preserve basebase unsafe_load(unsafe_load(reinterpret(Ptr{Ptr{Ptr{Nothing}}},prev)))+off ) # expect a pointer-pointer-pointer at the previous offset, dereference that pointer twice, and add the offset to it
+        # sizeof(SArray{Tuple{N},SomeNonIsBitsType,1,N}) == 8 ⇒ it seems that SArray of non-isbits types allocates a single, intermediate array (we perform double dereferencing here)
+      : :( @GC.preserve basebase unsafe_load(reinterpret(Ptr{Ptr{Nothing}},prev))+off ) # all other non-inlined types: expect a pointer-pointer ad the previous offset, dereference it and add the offset to it
       )
   end
-  @generated function fieldpointer_static(basebase,base::T,off::Int64,::Nothing) where T
-    return T <: Ptr ? :(base+off) : T.mutable ? :( pointer_from_objref(base)+off ) : :( nothing )
+  @generated function fieldpointer_static(basebase,base::T,off::Int64,::Nothing) where T # the case where no previous offset is present
+    return ( T <: Ptr
+           ? :( base   + off )
+           : T <: RPtr
+           ? :( base.x + off )
+           : T.mutable
+           ? :( pointer_from_objref(base) + off )
+           : :( nothing )
+           )
   end
 
-
-  pointer_from_objref_typed(x :: T) where T = reinterpret(Ptr{T},pointer_from_objref(x))
-
+  # leftBalance:
+  #   Julia's -> operator has a right-fixity, where C's -> operator has a left-fixity
+  #     e.g.    a -> b -> c
+  #     Julia:  a ->(b -> c)
+  #     C    : (a -> b)-> c
+  #   that is what we are re-ordering here
   # see Tree.agda
   #   :(a.b.c.d->e.f.g.x = v) == :( ((a.b).c).d -> (((e.f).g).x = v) )
   #     true
@@ -364,31 +440,28 @@ module MemoryMutate
   end
 
 
-  # # because pointer_from_objref is prohibited on immutables, we collect the pointers manually, beginning from the last occuring mutable
-  # const accumulatePointers = true
-  # # when in an immutable (non-isbits) type we want to set a field of non-isbits type, this is represented as a pointer and we update the pointer value then
-  # const writeReferences = true
-  # # when in an immutable (non-isbits) type we want to set a field of immutable non-isbits type, again this is a pointer, but also pointer_from_objref is now prohibited on this right-hand-side.
-  # # We use unsafe_load(reinterpret(Ptr{Ptr{Nothing}},Ref(rhs))) to obtain a pointer in that case.
-  # const reallocateImmutableRHSpointer = true
-
-  derefPtrPtr(x::T) where T = x
-  derefPtrPtr(x::Ptr{Ptr{T}}) where T = unsafe_load(x)
-  PtrOrNothing(x::T) where T = nothing
-  PtrOrNothing(x::Ptr{T}) where T = Ptr{Nothing}(x)
-
-  @inline getfieldorpointer(x::T,f::Symbol,idx::UInt64) where {T} = getfield(x,f)
-  @generated function getfieldorpointer(x::Ptr{T},f::Symbol,idx::UInt64) where {T}
+  # getfieldorpointer: obtain a field from a Ptr, RPtr or "regular" (i.e. all others) type
+  #   used getfield on "regular" (i.e. all other) types
+  #   obtains a fieldpointer, if the base value is a pointer
+  #     does not attempt to load the base value, except when the base value is a RPtr{Ptr{T}}
+  #     returns an RPtr in that case
+  #   statically unrolls the cases for all fieldnames of T
+  # TODO: BUG: what happens when T is a non-bitstype? => see `fieldpointer_static`
+  @inline                     getfieldorpointer(x::RPtr{    T },f::Symbol,idx::UInt64) where {T} = getfieldorpointer(            x.x ,f,idx) # x.x isa Ptr{T}
+  @inline                     getfieldorpointer(x::         T  ,f::Symbol,idx::UInt64) where {T} =          getfield(            x   ,f)
+  @inline                     getfieldorpointer(x::RPtr{Ptr{T}},f::Symbol,idx::UInt64) where {T} = getfieldorpointer(unsafe_load(x.x),f,idx) # x.x isa Ptr{Ptr{T}}
+  @inline @generated function getfieldorpointer(x::     Ptr{T} ,f::Symbol,idx::UInt64) where {T}
     sym_res = gensym()
     exprs = [:( $sym_res = false )]
     for (n,fA) in enumerate(fieldnames(T))
-      push!(exprs, :( f == $(QuoteNode(fA)) && ($sym_res = $derefPtrPtr(Ptr{$(fieldtypes(T)[n])}(x+$(fieldoffset(T,n))))  ) ))
+      # push!(exprs, :( f == $(QuoteNode(fA)) && ($sym_res = $derefPtrPtr(Ptr{$(fieldtypes(T)[n])}(x+$(fieldoffset(T,n))))  ) ))
+      push!(exprs, :( f == $(QuoteNode(fA)) && ( $sym_res = RPtr(Ptr{$(fieldtypes(T)[n])}(x+$(fieldoffset(T,n)))) ) ) )
     end
     push!(exprs, :( return $sym_res ))
     return Expr(:block,exprs...)
   end
 
-  # structinfo(T) = [(fieldoffset(T,i), fieldname(T,i), fieldtype(T,i)) for i = 1:getfieldcount(T)];
+  # mem_helper: a wrapper around mem_helper1, to catch non-assignment-cases
   function mem_helper(expr, mode :: Symbol = :assignment, accumulatePointers :: Bool = false, writeReferences :: Bool = false, reallocateImmutableRHSpointer :: Bool = false, followPointers :: Bool = false)
     if followPointers
       expr = leftBalance(expr)
@@ -401,9 +474,22 @@ module MemoryMutate
       return action
     end
   end
+
+  # mem_helper1:
+  #   this is the main macro, responsible for collecting information of a "multi-level" sequence or "access-chain"
+  #      a.b.c.d
+  #      a->b->c->d
+  #      a[].b[].c[].d[]
+  #      a[].b[1].c[2,3].d[4,5,6]
+  #      and mixtures
+  #    and it calls `unsafe_store_generated2` at the end to perform the assignment (or just return the pointer)
+  # accumulatePointers           : because pointer_from_objref is prohibited on immutables, we collect the pointers manually, beginning from the last occuring mutable
+  # writeReferences              : when in an immutable (non-isbits) type we want to set a field of non-isbits type, this is represented as a pointer and we update the pointer value then
+  # reallocateImmutableRHSpointer: when in an immutable (non-isbits) type we want to set a field of immutable non-isbits type, again this is a pointer, but also pointer_from_objref is now prohibited on this right-hand-side.
+  #                                We use unsafe_load(reinterpret(Ptr{Ptr{Nothing}},Ref(rhs))) to obtain a pointer in that case.
   function mem_helper1(expr, mode :: Symbol = :assignment, accumulatePointers :: Bool = false, writeReferences :: Bool = false, reallocateImmutableRHSpointer :: Bool = false, followPointers :: Bool = false)
     if mode == :assignment
-      @assert expr.head == :(=) "Expression for mutating must be an assignment (=)." # unless we use a->b->c
+      @assert expr.head == :(=) "Expression for mutating must be an assignment (=)." # unless we use a->b->c, but this was already catched by `mem_helper` which is calling us
       RHS = expr.args[2]
       cur = expr.args[1]
     end
@@ -414,7 +500,7 @@ module MemoryMutate
 
     # level[n] contains an expression for the current level of access, most likely just a symbol but could be an arbitrary expression as well, or `nothing` if the dereference `[]` occured
     levels = []
-    cases = []
+    cases  = []
     while isa(cur,Expr)
       if cur.head == :(.)
         pushfirst!(levels,cur.args[2])
@@ -434,7 +520,7 @@ module MemoryMutate
         if cur.args[2] isa Symbol; pushfirst!(levels,QuoteNode(cur.args[2]))
         else                     ; pushfirst!(levels,          cur.args[2] )
         end
-        cur = cur.args[1] # LineNumberNodes are already filtered out by leftBalance
+        cur = cur.args[1] # LineNumberNodes are already filtered out by `leftBalance` in the calling `mem_helper`
       else
         break
       end
@@ -518,7 +604,7 @@ module MemoryMutate
 
     # https://github.com/JuliaLang/julia/issues/10578
     #   "Comments can be passed through using the Expr(:meta, ...) functionality we have now."
-    #   I am using LineNumberNode instead
+    #   Couldn't get this working, so we are using LineNumberNode instead for some debug information
     exprs = []
     for n=1:length(levels)-1
       level_str = replace(repr(levels[n]),"\n" => "")
@@ -551,11 +637,11 @@ module MemoryMutate
     =#
 
     # the first level: use the first level's value as the base to assign at the second-to-last accumulated offset the `rhs` of the second-to-last field's type in the second-to-last value
-    # expr_str = :(
+    # expr_sto = :(
     #     $(LineNumberNode(-1,"@val1+off$(length(levels)-1) <- val$(length(levels)-1)"))
     #   ; $unsafe_store_generated($(sym_val[length(levels)-1]),$(sym_fld[length(levels)-1]),$(sym_val[1]),$(sym_off[length(levels)-1]),$sym_rhs)
     #   )
-    expr_str = :(
+    expr_sto = :(
       $(LineNumberNode(-1,"@val1+off$(length(levels)-1) <- val$(length(levels)-1)"))
       ; $unsafe_store_generated2($(Val(mode)),$(sym_val[length(levels)-1]),$(sym_fld[length(levels)-1]),$(sym_val[1]),$(sym_off[length(levels)-1]),$sym_rhs,$(sym_ptr[1]),$(Val(accumulatePointers)),$(Val(writeReferences)),$(Val(reallocateImmutableRHSpointer)))
       )
@@ -563,19 +649,19 @@ module MemoryMutate
       expr_rec = :(
             $(sym_mut[1]) # is the current level's value of mutable?
           ? $setfield_or_deref($(Val(mode)),$(sym_val[1]),$(sym_fld[1]),$sym_rhs)
-          : $expr_str # use unsafe_store! on pointer_from_objref for the first level
+          : $expr_sto # use unsafe_store! on pointer_from_objref for the first level
           )
     else # directly use unsafe_store! on pointer_from_objref for the first level
-      expr_rec = expr_str
+      expr_rec = expr_sto
     end
 
     # the remaining levels: use the current level's value as the base to assign at the second-to-last accumulated offset the `rhs` of the second-to-last field's type in the second-to-last value
     for n=2:length(levels)-1
-      # expr_str = :(
+      # expr_sto = :(
       #     $(LineNumberNode(-1,"@val$(n)+off$(length(levels)-1) <- val$(length(levels)-1)"))
       #   ; $unsafe_store_generated($(sym_val[length(levels)-1]), $(sym_fld[length(levels)-1]), $(sym_val[n]), $(sym_off[length(levels)-1]),$sym_rhs)
       #   )
-      expr_str = :(
+      expr_sto = :(
           $(LineNumberNode(-1,"@val$(n)+off$(length(levels)-1) <- val$(length(levels)-1)"))
           ; $unsafe_store_generated2($(Val(mode)),$(sym_val[length(levels)-1]), $(sym_fld[length(levels)-1]), $(sym_val[n]), $(sym_off[length(levels)-1]),$sym_rhs,$(sym_ptr[n]),$(Val(accumulatePointers)),$(Val(writeReferences)),$(Val(reallocateImmutableRHSpointer)))
         )
@@ -583,14 +669,14 @@ module MemoryMutate
         expr_rec = :( $(sym_bit[n-1]) # is the current level's value of bitstype?
           ? $expr_rec # use one of the previous level's as a base pointer
           : ( $(sym_mut[n]) # is the current level's value mutable?
-            ? $setfield_or_deref($(Val(mode)),$(sym_val[length(levels)-1]),$(sym_fld[length(levels)-1]),$sym_rhs)
-            : $expr_str # use unsafe_store! on pointer_from_objref fot the current level
+            ? $setfield_or_deref($(Val(mode)),$(sym_val[length(levels)-1]),$(sym_fld[length(levels)-1]),$sym_rhs) # use the normal assignment
+            : $expr_sto # use unsafe_store! on pointer_from_objref fot the current level
             )
           )
       else
         expr_rec = :( $(sym_bit[n-1]) # is the current level's value of bitstype?
           ? $expr_rec # use one of the previous level's as a base pointer
-          : $expr_str # use unsafe_store! on pointer_from_objref fot the current level
+          : $expr_sto # use unsafe_store! on pointer_from_objref fot the current level
           )
       end
     end
@@ -602,6 +688,7 @@ module MemoryMutate
     return esc(Expr(:block,exprs...))
   end
 
+  # exported macros
   macro mem(expr)
     return mem_helper(expr,:assignment,false,false,false,true)
   end
@@ -611,7 +698,7 @@ module MemoryMutate
   macro ptr(expr)
     return mem_helper(expr,:pointer,true,true,true,true)
   end
-  macro voidptr(expr)
+  macro voidptr(expr) # Cvoid == Nothing
     return :(reinterpret(Ptr{Nothing},$(mem_helper(expr,:pointer,true,true,true,true))))
   end
   macro typedptr(type,expr)

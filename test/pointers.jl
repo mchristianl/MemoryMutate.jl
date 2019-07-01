@@ -24,8 +24,7 @@ end
 
 arr = Float32[0f0,1f0,2f0,3f0,4f0]
 arrptr = pointer(arr)
-v = 0f0; @assert arr[2] != v; @mem arrptr[2] = v; @assert arr[2] == v;
-
+v = 9f0; @assert arr[2] != v; @mem arrptr[2] = v; @assert arr[2] == v;
 
 ################################################################################
 
@@ -166,4 +165,4 @@ code_native(io,test310,(Ptr{A3},C3));      display_asm_stat_io(io) # (total = 10
 code_native(io,test311,(Ptr{A3},Float32)); display_asm_stat_io(io) # (total = 2, movs = 1, mov = 0, vmov = 1)
 code_native(io,test312,(Ptr{A3},B3));      display_asm_stat_io(io) # (total = 8, movs = 5, mov = 1, vmov = 4)
 code_native(io,test313,(Ptr{A3},Float32)); display_asm_stat_io(io) # (total = 2, movs = 1, mov = 0, vmov = 1)
-code_native(io,test314,(Ptr{A3},A3));      display_asm_stat_io(io) # (total = 7, movs = 5, mov = 3, vmov = 2)
+code_native(io,test314,(Ptr{A3},A3));      display_asm_stat_io(io) # (total = 7, movs = 5, mov = 3, vmov = 2) # TODO: got (total = 11, movs = 9, mov = 5, vmov = 4)
