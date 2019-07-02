@@ -6,6 +6,8 @@ module MemoryMutate
   #    changed `throw` to `error`
   #    but this issue might be raised by `@assert`
   #      it occurs instead of an `undefined variable` error, which is hidden there
+  #    have this, when using `@ptr oc->pb` where `@ptr oc[]->pb` would be correct
+  # `@ptr r` where r is a Ref, returns a pointer to `Base.RefValue` of something. we might just want a pointer to something
   # we could, for non-bitstypes, allow `@mem a = x` to implement `unsafe_store!(Ptr{A}(pointer_from_objref(a)), x)`
   # Another reason to support this is, that when a C function is given a pointer (e.g. because it takes it's argument by reference) which resides inside of an allocated bitstype struct …
   #   put in another way: when we want to pass a C-reference/pointer which refers to a part of an (immutable) bitstype, this has to be a pointer for Julia
@@ -135,11 +137,25 @@ module MemoryMutate
   end
 
   # static variants suffice to obtain properties of value's types
-  refisbitstype_static(x::RPtr{T}) where T = refisbitstype_static(x.x)
-  refisbitstype_static(::Ptr{T}) where T = isbitstype(T)
-  refisbitstype_static(::Ref{T}) where T = isbitstype(T)
-  refisbitstype_static(::NTuple{N,T}) where {N,T} = isbitstype(T)
-  refisbitstype_static(::SArray{E,T,N,M}) where {E,T,N,M} = isbitstype(T)
+  #   in the case where we are dereferencing with :getindex
+  #   this is used to determine the `bit` value
+  #   which means:
+  #     "if there is a `fld` symbol, then this is a Bool, whether the type of `val`.`fld` is a bitstype"
+  #   it is used to determine which `unsafe_store_generated2` statement to use:
+  #     "is the current level's value of bitstype?                             "
+  #     "  then: use one of the previous level's as a base pointer             " = keep the base (in another interpretation)
+  #     "  else: use unsafe_store! on pointer_from_objref fot the current level" = advance the base (in another interpretation)
+  #   so, returning true here, will keep the old base
+  #   and returning false here, will advance the base to this level
+  # TODO: the `bit` value for each level seems to be used to determine whether or not `val`.`fld` qualifies as a new base(-pointer)
+  #   our variable naming should reflect that purpose
+  refisbitstype_static(x::    RPtr{T}    ) where    T      = refisbitstype_static(x.x) # behave like T
+  refisbitstype_static( ::     Ptr{T}    ) where    T      = isbitstype(T) # can advance to the next level, if T wants so
+  refisbitstype_static( ::     Ref{T}    ) where    T      = isbitstype(T) # can advance to the next level, if T wants so
+  refisbitstype_static( :: Ref{Ptr{T}}   ) where    T      = false # can advance the base to the next level in any way
+  refisbitstype_static( :: Ref{Ref{T}}   ) where    T      = false # can advance the base to the next level in any way
+  refisbitstype_static( ::NTuple{N,T}    ) where {N,T}     = isbitstype(T) # can advance to the next level, if T wants so
+  refisbitstype_static( ::SArray{E,T,N,M}) where {E,T,N,M} = isbitstype(T) # can advance to the next level, if T wants so
   # fieldisbitstype_static(::T, f::Symbol) where T = isbitstype(fieldtype(T,f))
   ismutable_static(::T) where T = T.mutable
   isreference_static(::T) where T = T <: Ref # note, that we have Ptr <: Ref
@@ -689,19 +705,20 @@ module MemoryMutate
   end
 
   # exported macros
+  #   the `let...end` was necessary to omit repl confusion which occurred sometimes when errors happened (even unrelated ones)
   macro mem(expr)
-    return mem_helper(expr,:assignment,false,false,false,true)
+    return :( let; $(mem_helper(expr,:assignment,false,false,false,true)); end )
   end
   macro yolo(expr)
-    return mem_helper(expr,:assignment,true,true,true,true)
+    return :( let; $(mem_helper(expr,:assignment,true,true,true,true)); end )
   end
   macro ptr(expr)
-    return mem_helper(expr,:pointer,true,true,true,true)
+    return :( let; $(mem_helper(expr,:pointer,true,true,true,true)); end )
   end
   macro voidptr(expr) # Cvoid == Nothing
-    return :(reinterpret(Ptr{Nothing},$(mem_helper(expr,:pointer,true,true,true,true))))
+    return :(reinterpret(Ptr{Nothing},let; $(mem_helper(expr,:pointer,true,true,true,true)); end))
   end
   macro typedptr(type,expr)
-    return :(reinterpret(Ptr{$type},$(mem_helper(expr,:pointer,true,true,true,true))))
+    return :(reinterpret(Ptr{$type},let; $(mem_helper(expr,:pointer,true,true,true,true)); end))
   end
 end
